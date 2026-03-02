@@ -13,6 +13,7 @@ use esp_hal::main;
 use esp_hal::time::{Duration, Instant};
 use log::info;
 
+
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -23,6 +24,9 @@ esp_bootloader_esp_idf::esp_app_desc!();
 )]
 #[main]
 fn main() -> ! {
+    // Initialize allocator with a size
+    esp_alloc::heap_allocator!(size: 32 * 1024);
+
     // generator version: 1.2.0
 
     esp_println::logger::init_logger_from_env();
