@@ -21,7 +21,7 @@ esp-backtrace = { version = "0.18.1", features = [
 ] }
 esp-println = { version = "0.16.1", features = ["esp32s3", "log-04"] }
 esp-alloc = "0.9.0"
-#burn = { version = "0.20.1", default-features = false }
+burn = { version = "0.20.1", default-features = false }
 
 [profile.release]
 codegen-units = 1        # LLVM can perform better optimizations using a single thread
