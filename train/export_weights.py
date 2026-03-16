@@ -41,7 +41,6 @@ def validate_model(pth_path, onnx_path, data_dir):
     import onnx
 
     # Load and inspect ONNX model
-    onnx_path = "../Models/MambaLite-Micro/mamba_har_model.onnx"
     model = onnx.load(onnx_path)
 
     # onnx_model = onnx.load(onnx_path)
@@ -108,6 +107,6 @@ def validate_model(pth_path, onnx_path, data_dir):
 
 if __name__ == "__main__":
     data_dir = r'../Datasets/har-uci-dataset/UCI HAR Dataset/'
-    export_pth_to_onnx("../Models/MambaLite-Micro/mamba_har_model.pth", "../Models/MambaLite-Micro/mamba_har_model.onnx")
+    export_pth_to_onnx("../Models/MambaLite-Micro/linear_har_model.pth", "./src/model/linear_har_model.onnx")
     # validate_model("../Models/MambaLite-Micro/mamba_har_model.pth", "../Models/MambaLite-Micro/mamba_har_model.onnx", data_dir)
     # export_pth_to_header("path/to/model.pth", "path/to/output/mamba_weights.h")
