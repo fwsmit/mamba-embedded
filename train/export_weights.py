@@ -15,6 +15,7 @@ from torch.utils.data import TensorDataset, DataLoader, random_split
 import torch.nn as nn
 
 def export_pth_to_onnx(pth_path, onnx_path):
+    print("Importing pth model", pth_path)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = TinyMambaHAR(input_dim=57, hidden_dim=64,
                          seq_len=10, num_classes=6).to(device)
@@ -32,10 +33,11 @@ def export_pth_to_onnx(pth_path, onnx_path):
                       input_names=['input'],
                       output_names=['output'],
                       opset_version=18,
-                      dynamo=True,
+                      dynamo=False,
                       do_constant_folding=True,
                       # report=True,
                       )  # Use the appropriate opset version
+    print("Exported model to", onnx_path)
 
 def validate_model(pth_path, onnx_path, data_dir):
     import onnx
