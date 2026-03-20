@@ -50,48 +50,24 @@ fn main() -> ! {
     let model: Model<Backend> = Model::default();
 
     info!("Running inference");
-    // let i = 0.12;
-    // let input = InputType::from_floats([[i]], &device);
-    // let output = model.forward(input);
+    let i = 0.12;
+    let input = InputType::from_floats([[i]], &device);
+    let output = model.forward(input);
     // Create a new input tensor (all zeros for demonstration purposes)
     // let input = InputType::zeros([1, 1, 28, 28], &device);
 
     // Run the model
     // let output = run_model(&model, &device, input);
 
-    let mut i = 0.0;
+    // Print the output
+    info!("{:?}", output);
+    info!("Finished");
     loop {
-        if i > 2.0 {
-            i = 0.0
-        }
-        i += 0.05;
-
-        let input = InputType::from_floats([[i]], &device);
-        let output = model.forward(input);
-        // Run the model
-        // let output = run_model(&model, &device, input);
-
-        // Output the values
-        match output.into_data().as_slice::<f32>() {
-            Ok(slice) => log::info!("input: {:.3} - output: {:?}", i, slice),
-            Err(err) => core::panic!("err: {:?}", err),
-        };
-
         let delay_start = Instant::now();
         while delay_start.elapsed() < Duration::from_millis(500) {
             // info!("Waiting")
         }
-        // Timer::after_millis(1).await; // Have some time to flush out the serial data
     }
-    // Print the output
-    // info!("{:?}", output);
-    // info!("Finished");
-    // loop {
-    //     let delay_start = Instant::now();
-    //     while delay_start.elapsed() < Duration::from_millis(500) {
-    //         // info!("Waiting")
-    //     }
-    // }
 }
 
 // fn run_model(
