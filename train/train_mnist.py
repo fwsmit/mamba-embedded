@@ -23,35 +23,51 @@ from torch.optim.lr_scheduler import StepLR
 import onnxruntime as ort
 import numpy as np
 
-
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 8, 3)
-        self.conv2 = nn.Conv2d(8, 16, 3)
-        self.conv3 = nn.Conv2d(16, 24, 3)
-        self.norm1 = nn.BatchNorm2d(24)
-        self.dropout1 = nn.Dropout(0.3)
-        self.fc1 = nn.Linear(24 * 22 * 22, 32)
-        self.fc2 = nn.Linear(32, 10)
-        self.norm2 = nn.BatchNorm1d(10)
+        self.fc1 = nn.Linear(28 * 28, 128)  # Flattening the 28x28 input image to 1D
+        self.fc2 = nn.Linear(128, 64)        # Intermediate layer
+        self.fc3 = nn.Linear(64, 10)         # Output layer for 10 classes (digits 0-9)
+        self.dropout = nn.Dropout(0.2)       # Dropout for regularization
 
     def forward(self, x):
-        x = self.conv1(x)
-        x = F.relu(x)
-        x = self.conv2(x)
-        x = F.relu(x)
-        x = self.conv3(x)
-        x = F.relu(x)
-        x = self.norm1(x)
-        x = torch.flatten(x, 1)
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.dropout1(x)
-        x = self.fc2(x)
-        x = self.norm2(x)
-        output = F.log_softmax(x, dim=1)
+        x = torch.flatten(x, 1)              # Flatten the input without batch size
+        x = F.relu(self.fc1(x))              # Activation after fc1
+        x = self.dropout(x)                   # Apply dropout
+        x = F.relu(self.fc2(x))              # Activation after fc2
+        x = self.fc3(x)                       # Output logits
+        output = F.log_softmax(x, dim=1)     # Apply softmax
         return output
+
+# class Net(nn.Module):
+#     def __init__(self):
+#         super(Net, self).__init__()
+#         self.conv1 = nn.Conv2d(1, 8, 3)
+#         self.conv2 = nn.Conv2d(8, 16, 3)
+#         self.conv3 = nn.Conv2d(16, 24, 3)
+#         self.norm1 = nn.BatchNorm2d(24)
+#         self.dropout1 = nn.Dropout(0.3)
+#         self.fc1 = nn.Linear(24 * 22 * 22, 32)
+#         self.fc2 = nn.Linear(32, 10)
+#         self.norm2 = nn.BatchNorm1d(10)
+#
+#     def forward(self, x):
+#         x = self.conv1(x)
+#         x = F.relu(x)
+#         x = self.conv2(x)
+#         x = F.relu(x)
+#         x = self.conv3(x)
+#         x = F.relu(x)
+#         x = self.norm1(x)
+#         x = torch.flatten(x, 1)
+#         x = self.fc1(x)
+#         x = F.relu(x)
+#         x = self.dropout1(x)
+#         x = self.fc2(x)
+#         x = self.norm2(x)
+#         output = F.log_softmax(x, dim=1)
+#         return output
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -103,7 +119,8 @@ def test_onnx(onnx_path, comp_model, test_loader, device):
             data_on_device = data.to(device)
             output_target = comp_model(data_on_device)
 
-            output = ort_sess.run(None, {'input.1': data.numpy()})
+            # output = ort_sess.run(None, {'input.1': data.numpy()})
+            output = ort_sess.run(None, {'onnx::Flatten_0': data.numpy()})
             target_np = output_target.cpu().numpy()
             are_similar = np.allclose(target_np, output, atol=atol)
 

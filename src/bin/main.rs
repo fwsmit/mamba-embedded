@@ -13,12 +13,15 @@ type Backend = NdArray<f32>;
 type BackendDevice = <Backend as burn::tensor::backend::Backend>::Device;
 
 use burn::{backend::NdArray, tensor::Tensor};
+
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::main;
 use esp_hal::time::{Duration, Instant};
 use log::info;
-use mamba_embedded::sine::Model;
+use mamba_embedded::mymodel::Model;
+
+type InputType = Tensor<NdArray<f32>, 2>;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -34,8 +37,8 @@ fn main() -> ! {
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
 
     // generator version: 1.2.0
-
     esp_println::logger::init_logger_from_env();
+    // info!("Started");
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let _peripherals = esp_hal::init(config);
@@ -46,37 +49,64 @@ fn main() -> ! {
     // Create a new model and load the state
     let model: Model<Backend> = Model::default();
 
-    // Define input, this is the `x` in the function `y = sin(x)` that we are
-    // approximating with our model
-    let mut input = 0.0;
+    info!("Running inference");
+    // let i = 0.12;
+    // let input = InputType::from_floats([[i]], &device);
+    // let output = model.forward(input);
+    // Create a new input tensor (all zeros for demonstration purposes)
+    // let input = InputType::zeros([1, 1, 28, 28], &device);
 
+    // Run the model
+    // let output = run_model(&model, &device, input);
+
+    let mut i = 0.0;
     loop {
-        info!("Hello world!");
-        if input > 2.0 {
-            input = 0.0
+        if i > 2.0 {
+            i = 0.0
         }
-        input += 0.05;
+        i += 0.05;
 
+        let input = InputType::from_floats([[i]], &device);
+        let output = model.forward(input);
         // Run the model
-        let output = run_model(&model, &device, input);
+        // let output = run_model(&model, &device, input);
 
         // Output the values
         match output.into_data().as_slice::<f32>() {
-            Ok(slice) => log::info!("input: {:.3} - output: {:?}", input, slice),
+            Ok(slice) => log::info!("input: {:.3} - output: {:?}", i, slice),
             Err(err) => core::panic!("err: {:?}", err),
         };
 
         let delay_start = Instant::now();
-        while delay_start.elapsed() < Duration::from_millis(500) {}
+        while delay_start.elapsed() < Duration::from_millis(500) {
+            // info!("Waiting")
+        }
+        // Timer::after_millis(1).await; // Have some time to flush out the serial data
     }
-
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0/examples
+    // Print the output
+    // info!("{:?}", output);
+    // info!("Finished");
+    // loop {
+    //     let delay_start = Instant::now();
+    //     while delay_start.elapsed() < Duration::from_millis(500) {
+    //         // info!("Waiting")
+    //     }
+    // }
 }
 
-fn run_model(model: &Model<NdArray>, device: &BackendDevice, input: f32) -> Tensor<Backend, 2> {
-    // Define the tensor
-    let input = Tensor::<Backend, 2>::from_floats([[input]], device);
-
-    // Run the model on the input
-    model.forward(input)
-}
+// fn run_model(
+//     model: &Model<NdArray>,
+//     device: &BackendDevice,
+//     input: InputType,
+// ) -> Tensor<Backend, 2> {
+//     // Define the tensor
+//     // let input = Tensor::<Backend, 4>::from_floats([[input]], device);
+//     info!("Running inference");
+//
+//     // Run the model on the input
+//     let output = model.forward(input);
+//     info!("Got output");
+//     info!("output is {:?}", output);
+//
+//     output
+// }

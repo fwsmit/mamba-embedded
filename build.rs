@@ -1,5 +1,5 @@
 fn main() {
-    // generate_model();
+    generate_model();
 
     linker_be_nice();
     // make sure linkall.x is the last linker script (otherwise might cause problems with flip-link)
@@ -71,12 +71,12 @@ fn linker_be_nice() {
     );
 }
 
-use burn_import::onnx::ModelGen;
+use burn_onnx::ModelGen;
 
 fn generate_model() {
     // Generate the model code from the ONNX file.
     ModelGen::new()
-        .input("src/model/linear_har_model.onnx")
+        .input("src/model/sine.onnx")
         .out_dir("model/")
         .embed_states(true)
         .run_from_script();
