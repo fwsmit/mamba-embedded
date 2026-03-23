@@ -75,9 +75,9 @@ use burn_onnx::ModelGen;
 
 fn generate_model() {
     // Generate the model code from the ONNX file.
-    ModelGen::new()
-        .input("src/model/sine.onnx")
-        .out_dir("model/")
-        .embed_states(true)
-        .run_from_script();
+    // ModelGen::new()
+    //     .input("src/model/mnist.onnx")
+    //     .out_dir("model/")
+    //     .embed_states(true)
+    //     .run_from_script();
 }

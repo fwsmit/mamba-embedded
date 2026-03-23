@@ -26,17 +26,19 @@ import numpy as np
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(28 * 28, 128)  # Flattening the 28x28 input image to 1D
-        self.fc2 = nn.Linear(128, 64)        # Intermediate layer
-        self.fc3 = nn.Linear(64, 10)         # Output layer for 10 classes (digits 0-9)
-        self.dropout = nn.Dropout(0.2)       # Dropout for regularization
+        self.conv1 = nn.Conv2d(1, 1, 4, 4)
+        self.fc1 = nn.Linear(49, 10)  # Flattening the 28x28 input image to 1D
+        # self.fc2 = nn.Linear(128, 64)        # Intermediate layer
+        # self.fc3 = nn.Linear(64, 10)         # Output layer for 10 classes (digits 0-9)
+        # self.dropout = nn.Dropout(0.2)       # Dropout for regularization
 
     def forward(self, x):
+        x = F.relu(self.conv1(x))
         x = torch.flatten(x, 1)              # Flatten the input without batch size
         x = F.relu(self.fc1(x))              # Activation after fc1
-        x = self.dropout(x)                   # Apply dropout
-        x = F.relu(self.fc2(x))              # Activation after fc2
-        x = self.fc3(x)                       # Output logits
+        # x = self.dropout(x)                   # Apply dropout
+        # x = F.relu(self.fc2(x))              # Activation after fc2
+        # x = self.fc3(x)                       # Output logits
         output = F.log_softmax(x, dim=1)     # Apply softmax
         return output
 
@@ -120,7 +122,7 @@ def test_onnx(onnx_path, comp_model, test_loader, device):
             output_target = comp_model(data_on_device)
 
             # output = ort_sess.run(None, {'input.1': data.numpy()})
-            output = ort_sess.run(None, {'onnx::Flatten_0': data.numpy()})
+            output = ort_sess.run(None, {'input': data.numpy()})
             target_np = output_target.cpu().numpy()
             are_similar = np.allclose(target_np, output, atol=atol)
 
