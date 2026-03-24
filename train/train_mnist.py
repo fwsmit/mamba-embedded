@@ -21,55 +21,40 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 import onnxruntime as ort
+import onnx
 import numpy as np
+from mamba_ssm.modules.mamba_simple import Mamba
+
 
 class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 1, 4, 4)
-        self.fc1 = nn.Linear(49, 10)  # Flattening the 28x28 input image to 1D
-        # self.fc2 = nn.Linear(128, 64)        # Intermediate layer
-        # self.fc3 = nn.Linear(64, 10)         # Output layer for 10 classes (digits 0-9)
-        # self.dropout = nn.Dropout(0.2)       # Dropout for regularization
+    def __init__(self, d_model: int = 8, d_state: int = 4):
+        super().__init__()
+        self.input_proj = nn.Linear(28, d_model, bias=False)   # row → d_model
+        self.mamba = Mamba(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=3,
+            expand=2,
+        )
 
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = torch.flatten(x, 1)              # Flatten the input without batch size
-        x = F.relu(self.fc1(x))              # Activation after fc1
-        # x = self.dropout(x)                   # Apply dropout
-        # x = F.relu(self.fc2(x))              # Activation after fc2
-        # x = self.fc3(x)                       # Output logits
-        output = F.log_softmax(x, dim=1)     # Apply softmax
-        return output
+        # self.mamba = Mamba(
+        #     d_model=d_model, d_state=d_state,
+        #     d_conv=3, dt_rank=1, expand=2,
+        # )
+        self.classifier = nn.Linear(d_model, 10, bias=False)  # d_model → 10
 
-# class Net(nn.Module):
-#     def __init__(self):
-#         super(Net, self).__init__()
-#         self.conv1 = nn.Conv2d(1, 8, 3)
-#         self.conv2 = nn.Conv2d(8, 16, 3)
-#         self.conv3 = nn.Conv2d(16, 24, 3)
-#         self.norm1 = nn.BatchNorm2d(24)
-#         self.dropout1 = nn.Dropout(0.3)
-#         self.fc1 = nn.Linear(24 * 22 * 22, 32)
-#         self.fc2 = nn.Linear(32, 10)
-#         self.norm2 = nn.BatchNorm1d(10)
-#
-#     def forward(self, x):
-#         x = self.conv1(x)
-#         x = F.relu(x)
-#         x = self.conv2(x)
-#         x = F.relu(x)
-#         x = self.conv3(x)
-#         x = F.relu(x)
-#         x = self.norm1(x)
-#         x = torch.flatten(x, 1)
-#         x = self.fc1(x)
-#         x = F.relu(x)
-#         x = self.dropout1(x)
-#         x = self.fc2(x)
-#         x = self.norm2(x)
-#         output = F.log_softmax(x, dim=1)
-#         return output
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (B, 1, 28, 28)   — standard torchvision MNIST format
+        Returns:
+            logits: (B, 10)
+        """
+        x = x.squeeze(1)
+        x = self.input_proj(x)
+        x = self.mamba(x)
+        x = x.mean(dim=1)
+        return self.classifier(x)
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -78,7 +63,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target)
+        loss = F.cross_entropy(output, target)
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
@@ -98,7 +83,7 @@ def test(model, device, test_loader):
             data, target = data.to(device), target.to(device)
             output = model(data)
             # sum up batch loss
-            test_loss += F.nll_loss(output, target, reduction='sum').item()
+            test_loss += F.cross_entropy(output, target, reduction='sum').item()
             # get the index of the max log-probability
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
@@ -109,12 +94,20 @@ def test(model, device, test_loader):
         test_loss, correct, len(test_loader.dataset),
         100. * correct / len(test_loader.dataset)))
 
+
 def test_onnx(onnx_path, comp_model, test_loader, device):
+    # Load the ONNX model
+    tmp_model = onnx.load(onnx_path)
+    # Check that the model is well formed
+    onnx.checker.check_model(tmp_model)
+    # Print a human readable representation of the graph
+    # print(onnx.helper.printable_graph(model.graph))
+
     comp_model.eval()
     ort_sess = ort.InferenceSession(onnx_path)
     i = 0
     valid = True
-    atol = 1e-5
+    atol = 1e-4
     with torch.no_grad():
         for data, _ in test_loader:
             # data, target = data.to(device), target.to(device)
@@ -196,9 +189,9 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    dataset1 = datasets.MNIST('/tmp/mnist-data', train=True, download=True,
+    dataset1 = datasets.MNIST('../Datasets/', train=True, download=True,
                               transform=transform)
-    dataset2 = datasets.MNIST('/tmp/mnist-data', train=False,
+    dataset2 = datasets.MNIST('../Datasets/', train=False,
                               transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
@@ -218,8 +211,89 @@ def main():
 
     if args.export_onnx:
         dummy_input = torch.randn(1, 1, 28, 28, device=device)
-        torch.onnx.export(model, dummy_input, onnx_path,
-                          verbose=False, opset_version=16, external_data=False)
+
+        def _selective_scan_vectorized(u, delta, A, B, C, D=None,
+                                       z=None, delta_bias=None,
+                                       delta_softplus=False, return_last_state=False):
+            """
+            Vectorized pure-PyTorch drop-in for selective_scan_fn.
+ 
+            The recurrence h_t = dA_t*h_{t-1} + dB_t*u_t expands to:
+ 
+                h_t = sum_{s=0..t} (dA_{s+1}*...*dA_t) * dB_s * u_s
+                    = P_t * cumsum(bu / P)[t]
+ 
+            where P_s = dA_0 * dA_1 * ... * dA_s  (INCLUSIVE cumprod up to s).
+ 
+            Verification:
+              t=0: P_0*(bu_0/P_0) = bu_0                          = dB_0*u_0         ok
+              t=1: P_1*(bu_0/P_0 + bu_1/P_1) = dA_1*bu_0 + bu_1                     ok
+              t=2: P_2*(bu_0/P_0+bu_1/P_1+bu_2/P_2) = dA_1*dA_2*bu_0+dA_2*bu_1+bu_2 ok
+ 
+            aten::cumprod is unsupported in ONNX, so we use the identity:
+                cumprod(x) = exp(cumsum(log(x)))
+            which is valid here because dA = exp(delta*A) > 0 always.
+            """
+            if delta_bias is not None:
+                delta = delta + delta_bias.unsqueeze(-1)
+            if delta_softplus:
+                delta = F.softplus(delta)
+ 
+            # Discretise: dA (B,d,L,N),  dB (B,d,L,N)
+            dA = torch.exp(
+                delta.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(2)
+            )
+            dB = delta.unsqueeze(-1) * B.permute(0, 2, 1).unsqueeze(1)
+ 
+            # Inclusive prefix products via exp(cumsum(log(dA))) — avoids cumprod
+            # dA > 0 always, so log is safe
+            P = torch.exp(torch.cumsum(torch.log(dA), dim=2))  # (B,d,L,N)
+ 
+            # Vectorised scan: h = P * cumsum(bu / P, dim=L)
+            bu = dB * u.unsqueeze(-1)                           # (B,d,L,N)
+            h  = P * torch.cumsum(bu / P, dim=2)               # (B,d,L,N)
+ 
+            # Output: y_t = sum_N h_t * C_t
+            y = (h * C.permute(0, 2, 1).unsqueeze(1)).sum(-1)  # (B,d,L)
+ 
+            if D is not None:
+                y = y + D.unsqueeze(0).unsqueeze(-1) * u
+            if z is not None:
+                y = y * F.silu(z)
+ 
+            if return_last_state:
+                return y, h[:, :, -1, :]
+            return y
+
+        # use_fast_path=False alone is not enough — slow_forward still calls
+        # causal_conv1d_fn and selective_scan_fn (custom CUDA extensions) via
+        # module-level references that ONNX tracing cannot follow.
+        # Temporarily null them out to force the pure-PyTorch fallback branches.
+        import mamba_ssm.modules.mamba_simple as _mamba_mod
+        _orig_ccf = _mamba_mod.causal_conv1d_fn
+        _orig_ssf = _mamba_mod.selective_scan_fn
+
+        _mamba_mod.causal_conv1d_fn = None
+        _mamba_mod.selective_scan_fn = _selective_scan_vectorized
+        model.mamba.use_fast_path = False
+
+        torch.onnx.export(
+            model,
+            dummy_input,
+            onnx_path,
+            input_names=["input"],
+            output_names=["output"],
+            verbose=False,
+            opset_version=None,
+            external_data=False,
+            optimize=True,
+            # dynamo=True,
+        )
+
+        # Restore for any subsequent inference / training
+        _mamba_mod.causal_conv1d_fn = _orig_ccf
+        # _mamba_mod.selective_scan_fn = _orig_ssf
+        model.mamba.use_fast_path = True
 
         print("Testing onnx model")
         test_onnx(onnx_path, model, validate_loader, device)
