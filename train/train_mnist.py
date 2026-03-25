@@ -23,6 +23,7 @@ from torch.optim.lr_scheduler import StepLR
 import onnxruntime as ort
 import onnx
 import numpy as np
+import os
 from mamba_ssm.modules.mamba_simple import Mamba
 
 
@@ -132,6 +133,7 @@ def test_onnx(onnx_path, comp_model, test_loader, device):
     else:
         print("ONNX validation succeeded (e <", atol, ")")
 
+
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
@@ -215,46 +217,29 @@ def main():
         def _selective_scan_vectorized(u, delta, A, B, C, D=None,
                                        z=None, delta_bias=None,
                                        delta_softplus=False, return_last_state=False):
-            """
-            Vectorized pure-PyTorch drop-in for selective_scan_fn.
- 
-            The recurrence h_t = dA_t*h_{t-1} + dB_t*u_t expands to:
- 
-                h_t = sum_{s=0..t} (dA_{s+1}*...*dA_t) * dB_s * u_s
-                    = P_t * cumsum(bu / P)[t]
- 
-            where P_s = dA_0 * dA_1 * ... * dA_s  (INCLUSIVE cumprod up to s).
- 
-            Verification:
-              t=0: P_0*(bu_0/P_0) = bu_0                          = dB_0*u_0         ok
-              t=1: P_1*(bu_0/P_0 + bu_1/P_1) = dA_1*bu_0 + bu_1                     ok
-              t=2: P_2*(bu_0/P_0+bu_1/P_1+bu_2/P_2) = dA_1*dA_2*bu_0+dA_2*bu_1+bu_2 ok
- 
-            aten::cumprod is unsupported in ONNX, so we use the identity:
-                cumprod(x) = exp(cumsum(log(x)))
-            which is valid here because dA = exp(delta*A) > 0 always.
-            """
             if delta_bias is not None:
                 delta = delta + delta_bias.unsqueeze(-1)
             if delta_softplus:
                 delta = F.softplus(delta)
  
-            # Discretise: dA (B,d,L,N),  dB (B,d,L,N)
-            dA = torch.exp(
-                delta.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(2)
-            )
-            dB = delta.unsqueeze(-1) * B.permute(0, 2, 1).unsqueeze(1)
+            # log_dA = delta * A  (skipping the exp entirely — it would cancel with log anyway)
+            # A has shape (d_inner, d_state), A is negative by construction (-exp(A_log))
+            log_dA = delta.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(2)  # (B, d, L, N)
  
-            # Inclusive prefix products via exp(cumsum(log(dA))) — avoids cumprod
-            # dA > 0 always, so log is safe
-            P = torch.exp(torch.cumsum(torch.log(dA), dim=2))  # (B,d,L,N)
+            # dB = delta * B,  shape (B, d, L, N)
+            # B arrives as (B, d_state, L) per selective_scan_fn convention
+            dB = delta.unsqueeze(-1) * B.permute(0, 2, 1).unsqueeze(1)  # (B, d, L, N)
+ 
+            # Inclusive prefix products: P_t = exp(cumsum(delta*A, dim=L))
+            # No cumprod op used — ONNX-compatible
+            P = torch.exp(torch.cumsum(log_dA, dim=2))  # (B, d, L, N)
  
             # Vectorised scan: h = P * cumsum(bu / P, dim=L)
-            bu = dB * u.unsqueeze(-1)                           # (B,d,L,N)
-            h  = P * torch.cumsum(bu / P, dim=2)               # (B,d,L,N)
+            bu = dB * u.unsqueeze(-1)                    # (B, d, L, N)
+            h  = P * torch.cumsum(bu / P, dim=2)         # (B, d, L, N)
  
-            # Output: y_t = sum_N h_t * C_t
-            y = (h * C.permute(0, 2, 1).unsqueeze(1)).sum(-1)  # (B,d,L)
+            # Output projection: y_t = sum_N(h_t * C_t)
+            y = (h * C.permute(0, 2, 1).unsqueeze(1)).sum(-1)  # (B, d, L)
  
             if D is not None:
                 y = y + D.unsqueeze(0).unsqueeze(-1) * u
@@ -287,7 +272,7 @@ def main():
             opset_version=None,
             external_data=False,
             optimize=True,
-            # dynamo=True,
+            dynamo=False,
         )
 
         # Restore for any subsequent inference / training
@@ -297,6 +282,8 @@ def main():
 
         print("Testing onnx model")
         test_onnx(onnx_path, model, validate_loader, device)
+        print(f"ONNX model size: {os.path.getsize(onnx_path):,} bytes "
+            f"({os.path.getsize(onnx_path)/1024:.2f} KB)")
 
 
 if __name__ == '__main__':
