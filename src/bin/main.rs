@@ -7,7 +7,7 @@
 )]
 #![deny(clippy::large_stack_frames)]
 
-use burn::{backend::NdArray, tensor::Tensor};
+use burn::backend::NdArray;
 
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
@@ -18,9 +18,9 @@ use mamba_embedded::data::mnist_tensor::mnist_tensor;
 use mamba_embedded::mymodel::Model;
 // Set the backend to NdArray with f32
 type Backend = NdArray<f32>;
-type BackendDevice = <Backend as burn::tensor::backend::Backend>::Device;
+// type BackendDevice = <Backend as burn::tensor::backend::Backend>::Device;
 
-type InputType = Tensor<Backend, 4>;
+// type InputType = Tensor<Backend, 4>;
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -45,22 +45,25 @@ fn main() -> ! {
     let _peripherals = esp_hal::init(config);
 
     // Get a default device for the backend
-    let device = BackendDevice::default();
+    // let device = BackendDevice::default();
 
     // Create a new model and load the state
     let model: Model<Backend> = Model::default();
 
     info!("Running inference");
-    let i = 0.12;
-    let input = mnist_tensor();
-    let output = model.forward(input);
 
-    // Print the output
-    info!("{:?}", &output);
-    let guess = output.argmax(1).into_scalar();
-    info!("Guess: {:?}", guess);
-    info!("Finished");
     loop {
+        let input = mnist_tensor();
+        let inference_timer = Instant::now();
+        let output = model.forward(input);
+        let inference_time = inference_timer.elapsed();
+
+        // Print the output
+        info!("{:?}", &output);
+        let guess = output.argmax(1).into_scalar();
+        info!("Guess: {:?}", guess);
+        info!("Inference done in: {:?} ms", inference_time.as_millis());
+        info!("Finished");
         let delay_start = Instant::now();
         while delay_start.elapsed() < Duration::from_millis(500) {}
     }
