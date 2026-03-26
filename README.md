@@ -1,1 +1,32 @@
-For building the model, uncomment the build_model line in the build.rs script
+
+# Building
+
+## Install dependencies
+
+This project needs the following dependencies:
+
+- espup (rust toolchain for ESP devices)
+- pytorch
+- mamba-ssm
+
+## Train the model
+
+```shell
+python model/train.py
+```
+
+This exports the model to onnx and places it in the src/model directory
+
+## Create test vector
+
+```shell
+python utils/mnist_to_burn_tensor.py
+```
+
+This exports the test
+
+## Run rust project
+
+```shell
+cargo run --release
+```

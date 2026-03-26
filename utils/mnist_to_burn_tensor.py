@@ -37,7 +37,7 @@ mnist = datasets.MNIST(
 
 # ── 2. Pick one sample ────────────────────────────────────────────────────────
 
-sample_index = 1
+sample_index = 2
 image_tensor, label = mnist[sample_index]  # shape: (1, 28, 28) — C, H, W
 
 print(f"Sample index : {sample_index}")
