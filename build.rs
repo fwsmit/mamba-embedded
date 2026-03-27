@@ -1,3 +1,5 @@
+use burn_onnx::ModelGen;
+
 fn main() {
     generate_model();
 
@@ -71,12 +73,15 @@ fn linker_be_nice() {
     );
 }
 
-use burn_onnx::ModelGen;
-
 fn generate_model() {
+    println!("cargo::rerun-if-env-changed=MODEL");
+    let model_type = env!("MODEL");
     // Generate the model code from the ONNX file.
+    let model_path = ["src/models/", "mnist", "-", model_type, ".onnx"].join("");
+    println!("cargo::rerun-if-changed={}", model_path);
+
     ModelGen::new()
-        .input("src/models/mnist.onnx")
+        .input(&model_path)
         .out_dir("model/")
         .embed_states(true)
         .run_from_script();

@@ -30,3 +30,7 @@ This exports the test
 ```shell
 cargo run --release
 ```
+
+# Environment variables
+
+`MODEL`: Select which model to use. Choices from the following models: `mamba-1` `mamba-5`.

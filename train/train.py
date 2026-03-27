@@ -3,6 +3,8 @@
 
 from __future__ import print_function
 import argparse
+import sys
+from typing import assert_never
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,9 +25,6 @@ model_dir = os.path.join("src", "models")
 class Model(Enum):
     MAMBA_ONE = auto(),  # One layer mamba model
     MAMBA_FIVE = auto(),  # Five layer mamba model
-
-
-model_type = Model.MAMBA_ONE
 
 
 class ResidualMamba(nn.Module):
@@ -206,13 +205,17 @@ def main():
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
     validate_loader = torch.utils.data.DataLoader(dataset2, **validate_kwargs)
 
+    model_type = os.environ['MODEL']
+
     match (model_type):
-        case Model.MAMBA_ONE:
+        case "mamba-1":
             model = Net(n_layers=1).to(device)
-            model_name = "mnist-mamba1"
-        case Model.MAMBA_FIVE:
+            model_name = "mnist-mamba-1"
+        case "mamba-5":
             model = Net(n_layers=5).to(device)
-            model_name = "mnist-mamba5"
+            model_name = "mnist-mamba-5"
+        case _:
+            sys.exit("Please specify a correct model with the environment variable MODEL")
 
     onnx_path = os.path.join(model_dir, model_name + ".onnx")
     pt_path = os.path.join(model_dir, model_name + ".pt")
