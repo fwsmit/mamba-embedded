@@ -15,6 +15,8 @@ import numpy as np
 import os
 from mamba_ssm.modules.mamba_simple import Mamba
 
+dataset_dir = "./data"
+model_dir = os.path.join("src", "models")
 
 class ResidualMamba(nn.Module):
     def __init__(self, d_model, d_state, d_conv, expand):
@@ -152,8 +154,8 @@ def main():
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
-                        help='how many batches to wait before logging training status')
-    parser.add_argument('--save-model', action='store_true', default=False,
+    #                    help='how many batches to wait before logging training status')
+    #parser.add_argument('--save-model', action='store_true', default=False,
                         help='For Saving the current Model')
     parser.add_argument('--export-onnx', action='store_true', default=True,
                         help='For Saving the current Model in ONNX format')
@@ -161,7 +163,9 @@ def main():
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     use_mps = not args.no_mps and torch.backends.mps.is_available()
 
-    onnx_path = "./src/model/mnist.onnx"
+    model_name = "mnist"
+    onnx_path = os.path.join(model_dir, model_name + ".onnx")
+    pt_path = os.path.join(model_dir, model_name + ".pt")
     torch.manual_seed(args.seed)
 
     if use_cuda:
@@ -187,9 +191,9 @@ def main():
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
-    dataset1 = datasets.MNIST('../Datasets/', train=True, download=True,
+    dataset1 = datasets.MNIST(dataset_dir, train=True, download=True,
                               transform=transform)
-    dataset2 = datasets.MNIST('../Datasets/', train=False,
+    dataset2 = datasets.MNIST(dataset_dir, train=False,
                               transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
@@ -204,8 +208,7 @@ def main():
         test(model, device, test_loader)
         scheduler.step()
 
-    if args.save_model:
-        torch.save(model, "mnist.pt")
+    torch.save(model, pt_path)
 
     if args.export_onnx:
         dummy_input = torch.randn(1, 1, 28, 28, device=device)

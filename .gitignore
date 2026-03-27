@@ -27,5 +27,7 @@ target/
 
 __pycache__
 
-src/model/*.onnx
+*.onnx
+*.pt
 src/data/mnist_tensor.rs
+data/
