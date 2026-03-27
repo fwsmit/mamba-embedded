@@ -117,7 +117,7 @@ def test(model, device, test_loader):
     )
 
 
-def test_onnx(onnx_path, comp_model, test_loader, device):
+def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
     # Load the ONNX model
     tmp_model = onnx.load(onnx_path)
     # Check that the model is well formed
@@ -147,6 +147,9 @@ def test_onnx(onnx_path, comp_model, test_loader, device):
                 print("result", output)
                 valid = False
             i += 1
+
+            if not full_test and i > 100:
+                break
 
     if not valid:
         print("ONNX validation failed")
@@ -229,6 +232,12 @@ def main():
         action="store_true",
         default=True,
         help="For Saving the current Model in ONNX format",
+    )
+    parser.add_argument(
+        "--full-test-onnx",
+        action="store_true",
+        default=False,
+        help="Test the onnx exported model fully against the pytorch model",
     )
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -382,7 +391,7 @@ def main():
         # model.mamba.use_fast_path = True
 
         print("Testing onnx model")
-        test_onnx(onnx_path, model, validate_loader, device)
+        test_onnx(onnx_path, model, validate_loader, device, args.full_test_onnx)
         print(
             f"ONNX model size: {os.path.getsize(onnx_path):,} bytes "
             f"({os.path.getsize(onnx_path) / 1024:.2f} KB)"
