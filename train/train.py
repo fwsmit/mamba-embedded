@@ -1,10 +1,10 @@
-# Originally copied and modified from: https://github.com/pytorch/examples/blob/main/mnist/main.py
+# Originally copied and modified from:
+# https://github.com/pytorch/examples/blob/main/mnist/main.py
 # under the following license:  BSD-3-Clause license
 
 from __future__ import print_function
 import argparse
 import sys
-from typing import assert_never
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,32 +23,36 @@ model_dir = os.path.join("src", "models")
 
 
 class Model(Enum):
-    MAMBA_ONE = auto(),  # One layer mamba model
-    MAMBA_FIVE = auto(),  # Five layer mamba model
+    MAMBA_ONE = (auto(),)  # One layer mamba model
+    MAMBA_FIVE = (auto(),)  # Five layer mamba model
 
 
 class ResidualMamba(nn.Module):
     def __init__(self, d_model, d_state, d_conv, expand):
         super().__init__()
-        self.mamba = Mamba(d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.mamba = Mamba(
+            d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand
+        )
 
     def forward(self, x):
-        return x + self.mamba(x)   # residual keeps gradients healthy
+        return x + self.mamba(x)  # residual keeps gradients healthy
 
 
 class Net(nn.Module):
     def __init__(self, d_model: int = 8, d_state: int = 4, n_layers: int = 5):
         super().__init__()
-        self.input_proj = nn.Linear(28, d_model, bias=False)   # row → d_model
-        self.mamba_layers = nn.Sequential(*[
-            ResidualMamba(
-                d_model=d_model,
-                d_state=d_state,
-                d_conv=3,
-                expand=2,
-            )
-            for _ in range(n_layers)
-        ])
+        self.input_proj = nn.Linear(28, d_model, bias=False)  # row → d_model
+        self.mamba_layers = nn.Sequential(
+            *[
+                ResidualMamba(
+                    d_model=d_model,
+                    d_state=d_state,
+                    d_conv=3,
+                    expand=2,
+                )
+                for _ in range(n_layers)
+            ]
+        )
         self.classifier = nn.Linear(d_model, 10, bias=False)  # d_model → 10
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -75,9 +79,15 @@ def train(args, model, device, train_loader, optimizer, epoch):
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.item()))
+            print(
+                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+                    epoch,
+                    batch_idx * len(data),
+                    len(train_loader.dataset),
+                    100.0 * batch_idx / len(train_loader),
+                    loss.item(),
+                )
+            )
             if args.dry_run:
                 break
 
@@ -91,16 +101,21 @@ def test(model, device, test_loader):
             data, target = data.to(device), target.to(device)
             output = model(data)
             # sum up batch loss
-            test_loss += F.cross_entropy(output, target, reduction='sum').item()
+            test_loss += F.cross_entropy(output, target, reduction="sum").item()
             # get the index of the max log-probability
             pred = output.argmax(dim=1, keepdim=True)
             correct += pred.eq(target.view_as(pred)).sum().item()
 
     test_loss /= len(test_loader.dataset)
 
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+    print(
+        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+            test_loss,
+            correct,
+            len(test_loader.dataset),
+            100.0 * correct / len(test_loader.dataset),
+        )
+    )
 
 
 def test_onnx(onnx_path, comp_model, test_loader, device):
@@ -123,7 +138,7 @@ def test_onnx(onnx_path, comp_model, test_loader, device):
             output_target = comp_model(data_on_device)
 
             # output = ort_sess.run(None, {'input.1': data.numpy()})
-            output = ort_sess.run(None, {'input': data.numpy()})
+            output = ort_sess.run(None, {"input": data.numpy()})
             target_np = output_target.cpu().numpy()
             are_similar = np.allclose(target_np, output, atol=atol)
 
@@ -143,31 +158,79 @@ def test_onnx(onnx_path, comp_model, test_loader, device):
 
 def main():
     # Training settings
-    parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
-                        help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
-                        help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=14, metavar='N',
-                        help='number of epochs to train (default: 14)')
-    parser.add_argument('--lr', type=float, default=1.0, metavar='LR',
-                        help='learning rate (default: 1.0)')
-    parser.add_argument('--gamma', type=float, default=0.7, metavar='M',
-                        help='Learning rate step gamma (default: 0.7)')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
-    parser.add_argument('--no-mps', action='store_true', default=False,
-                        help='disables macOS GPU training')
-    parser.add_argument('--dry-run', action='store_true', default=False,
-                        help='quickly check a single pass')
-    parser.add_argument('--seed', type=int, default=1, metavar='S',
-                        help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=10, metavar='N',
-    #                    help='how many batches to wait before logging training status')
-    #parser.add_argument('--save-model', action='store_true', default=False,
-                        help='For Saving the current Model')
-    parser.add_argument('--export-onnx', action='store_true', default=True,
-                        help='For Saving the current Model in ONNX format')
+    parser = argparse.ArgumentParser(description="PyTorch MNIST Example")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        metavar="N",
+        help="input batch size for training (default: 64)",
+    )
+    parser.add_argument(
+        "--test-batch-size",
+        type=int,
+        default=1000,
+        metavar="N",
+        help="input batch size for testing (default: 1000)",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=14,
+        metavar="N",
+        help="number of epochs to train (default: 14)",
+    )
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=1.0,
+        metavar="LR",
+        help="learning rate (default: 1.0)",
+    )
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=0.7,
+        metavar="M",
+        help="Learning rate step gamma (default: 0.7)",
+    )
+    parser.add_argument(
+        "--no-cuda", action="store_true", default=False, help="disables CUDA training"
+    )
+    parser.add_argument(
+        "--no-mps",
+        action="store_true",
+        default=False,
+        help="disables macOS GPU training",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="quickly check a single pass",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=1, metavar="S", help="random seed (default: 1)"
+    )
+    parser.add_argument(
+        "--log-interval",
+        type=int,
+        default=10,
+        metavar="N",
+        help="how many batches to wait before logging training status",
+    )
+    # parser.add_argument(
+    #     "--save-model",
+    #     action="store_true",
+    #     default=False,
+    #     help="For Saving the current Model",
+    # )
+    parser.add_argument(
+        "--export-onnx",
+        action="store_true",
+        default=True,
+        help="For Saving the current Model in ONNX format",
+    )
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     use_mps = not args.no_mps and torch.backends.mps.is_available()
@@ -181,33 +244,29 @@ def main():
     else:
         device = torch.device("cpu")
 
-    train_kwargs = {'batch_size': args.batch_size}
-    test_kwargs = {'batch_size': args.test_batch_size}
-    validate_kwargs = {'batch_size': 1}
+    train_kwargs = {"batch_size": args.batch_size}
+    test_kwargs = {"batch_size": args.test_batch_size}
+    validate_kwargs = {"batch_size": 1}
     if use_cuda:
-        cuda_kwargs = {'num_workers': 1,
-                       'pin_memory': True,
-                       'shuffle': True}
+        cuda_kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
         validate_kwargs.update(cuda_kwargs)
 
-
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    dataset1 = datasets.MNIST(dataset_dir, train=True, download=True,
-                              transform=transform)
-    dataset2 = datasets.MNIST(dataset_dir, train=False,
-                              transform=transform)
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+    )
+    dataset1 = datasets.MNIST(
+        dataset_dir, train=True, download=True, transform=transform
+    )
+    dataset2 = datasets.MNIST(dataset_dir, train=False, transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
     validate_loader = torch.utils.data.DataLoader(dataset2, **validate_kwargs)
 
-    model_type = os.environ['MODEL']
+    model_type = os.environ["MODEL"]
 
-    match (model_type):
+    match model_type:
         case "mamba-1":
             model = Net(n_layers=1).to(device)
             model_name = "mnist-mamba-1"
@@ -215,7 +274,9 @@ def main():
             model = Net(n_layers=5).to(device)
             model_name = "mnist-mamba-5"
         case _:
-            sys.exit("Please specify a correct model with the environment variable MODEL")
+            sys.exit(
+                "Please specify a correct model with the environment variable MODEL"
+            )
 
     onnx_path = os.path.join(model_dir, model_name + ".onnx")
     pt_path = os.path.join(model_dir, model_name + ".pt")
@@ -232,38 +293,52 @@ def main():
     if args.export_onnx:
         dummy_input = torch.randn(1, 1, 28, 28, device=device)
 
-        def _selective_scan_vectorized(u, delta, A, B, C, D=None,
-                                       z=None, delta_bias=None,
-                                       delta_softplus=False, return_last_state=False):
+        def _selective_scan_vectorized(
+            u,
+            delta,
+            A,
+            B,
+            C,
+            D=None,
+            z=None,
+            delta_bias=None,
+            delta_softplus=False,
+            return_last_state=False,
+        ):
             if delta_bias is not None:
                 delta = delta + delta_bias.unsqueeze(-1)
             if delta_softplus:
                 delta = F.softplus(delta)
- 
+
             # log_dA = delta * A  (skipping the exp entirely — it would cancel with log anyway)
             # A has shape (d_inner, d_state), A is negative by construction (-exp(A_log))
             log_dA = delta.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(2)  # (B, d, L, N)
- 
+
             # dB = delta * B,  shape (B, d, L, N)
             # B arrives as (B, d_state, L) per selective_scan_fn convention
-            dB = delta.unsqueeze(-1) * B.permute(0, 2, 1).unsqueeze(1)  # (B, d, L, N)
- 
+            dB = delta.unsqueeze(-1) * B.permute(
+                0,
+                2,
+                # (B, d, L, N)
+                1,
+            ).unsqueeze(1)
+
             # Inclusive prefix products: P_t = exp(cumsum(delta*A, dim=L))
             # No cumprod op used — ONNX-compatible
             P = torch.exp(torch.cumsum(log_dA, dim=2))  # (B, d, L, N)
- 
+
             # Vectorised scan: h = P * cumsum(bu / P, dim=L)
-            bu = dB * u.unsqueeze(-1)                    # (B, d, L, N)
-            h  = P * torch.cumsum(bu / P, dim=2)         # (B, d, L, N)
- 
+            bu = dB * u.unsqueeze(-1)  # (B, d, L, N)
+            h = P * torch.cumsum(bu / P, dim=2)  # (B, d, L, N)
+
             # Output projection: y_t = sum_N(h_t * C_t)
             y = (h * C.permute(0, 2, 1).unsqueeze(1)).sum(-1)  # (B, d, L)
- 
+
             if D is not None:
                 y = y + D.unsqueeze(0).unsqueeze(-1) * u
             if z is not None:
                 y = y * F.silu(z)
- 
+
             if return_last_state:
                 return y, h[:, :, -1, :]
             return y
@@ -273,8 +348,9 @@ def main():
         # module-level references that ONNX tracing cannot follow.
         # Temporarily null them out to force the pure-PyTorch fallback branches.
         import mamba_ssm.modules.mamba_simple as _mamba_mod
+
         _orig_ccf = _mamba_mod.causal_conv1d_fn
-        _orig_ssf = _mamba_mod.selective_scan_fn
+        # _orig_ssf = _mamba_mod.selective_scan_fn
 
         _mamba_mod.causal_conv1d_fn = None
         _mamba_mod.selective_scan_fn = _selective_scan_vectorized
@@ -300,9 +376,11 @@ def main():
 
         print("Testing onnx model")
         test_onnx(onnx_path, model, validate_loader, device)
-        print(f"ONNX model size: {os.path.getsize(onnx_path):,} bytes "
-            f"({os.path.getsize(onnx_path)/1024:.2f} KB)")
+        print(
+            f"ONNX model size: {os.path.getsize(onnx_path):,} bytes "
+            f"({os.path.getsize(onnx_path) / 1024:.2f} KB)"
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
