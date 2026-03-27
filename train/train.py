@@ -14,9 +14,19 @@ import onnx
 import numpy as np
 import os
 from mamba_ssm.modules.mamba_simple import Mamba
+from enum import Enum, auto
 
 dataset_dir = "./data"
 model_dir = os.path.join("src", "models")
+
+
+class Model(Enum):
+    MAMBA_ONE = auto(),  # One layer mamba model
+    MAMBA_FIVE = auto(),  # Five layer mamba model
+
+
+model_type = Model.MAMBA_ONE
+
 
 class ResidualMamba(nn.Module):
     def __init__(self, d_model, d_state, d_conv, expand):
@@ -163,9 +173,6 @@ def main():
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     use_mps = not args.no_mps and torch.backends.mps.is_available()
 
-    model_name = "mnist"
-    onnx_path = os.path.join(model_dir, model_name + ".onnx")
-    pt_path = os.path.join(model_dir, model_name + ".pt")
     torch.manual_seed(args.seed)
 
     if use_cuda:
@@ -199,7 +206,16 @@ def main():
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
     validate_loader = torch.utils.data.DataLoader(dataset2, **validate_kwargs)
 
-    model = Net().to(device)
+    match (model_type):
+        case Model.MAMBA_ONE:
+            model = Net(n_layers=1).to(device)
+            model_name = "mnist-mamba1"
+        case Model.MAMBA_FIVE:
+            model = Net(n_layers=5).to(device)
+            model_name = "mnist-mamba5"
+
+    onnx_path = os.path.join(model_dir, model_name + ".onnx")
+    pt_path = os.path.join(model_dir, model_name + ".pt")
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
