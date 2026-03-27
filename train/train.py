@@ -19,7 +19,6 @@ from mamba_ssm.modules.mamba_simple import Mamba
 from enum import Enum, auto
 
 dataset_dir = "./data"
-model_dir = os.path.join("src", "models")
 
 
 class Model(Enum):
@@ -278,8 +277,14 @@ def main():
                 "Please specify a correct model with the environment variable MODEL"
             )
 
-    onnx_path = os.path.join(model_dir, model_name + ".onnx")
-    pt_path = os.path.join(model_dir, model_name + ".pt")
+    dry_run_name = ""
+    model_dir = os.path.join("./src", "models")
+    if args.dry_run:
+        dry_run_name = "-dry"
+        model_dir = "/tmp"
+
+    onnx_path = os.path.join(model_dir, model_name + dry_run_name + ".onnx")
+    pt_path = os.path.join(model_dir, model_name + dry_run_name + ".pt")
     optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
@@ -287,6 +292,8 @@ def main():
         train(args, model, device, train_loader, optimizer, epoch)
         test(model, device, test_loader)
         scheduler.step()
+        if args.dry_run:
+            break
 
     torch.save(model, pt_path)
 
@@ -380,6 +387,7 @@ def main():
             f"ONNX model size: {os.path.getsize(onnx_path):,} bytes "
             f"({os.path.getsize(onnx_path) / 1024:.2f} KB)"
         )
+        print("Exported everything to", model_dir)
 
 
 if __name__ == "__main__":
