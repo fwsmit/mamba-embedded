@@ -273,6 +273,7 @@ def main():
     validate_loader = torch.utils.data.DataLoader(dataset2, **validate_kwargs)
 
     model_type = os.environ["MODEL"]
+    print("Trainging model:", model_type)
 
     match model_type:
         case "mamba-1":
