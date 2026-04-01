@@ -37,8 +37,25 @@ class ResidualMamba(nn.Module):
         return x + self.mamba(x)  # residual keeps gradients healthy
 
 
+class HARDataset(torch.utils.data.Dataset):
+    """HAR UCI Dataset loader"""
+    def __init__(self, data_path, labels_path):
+        # Use genfromtxt which handles multiple spaces better
+        # Or use loadtxt without delimiter to treat all whitespace as delimiter
+        self.data = np.loadtxt(data_path, ndmin=2)  # ndmin=2 ensures 2D array
+        self.labels = np.loadtxt(labels_path, dtype=int) - 1  # Convert to 0-indexed
+        
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        sample = torch.from_numpy(self.data[idx]).float()
+        label = torch.tensor(self.labels[idx], dtype=torch.long)
+        return sample.unsqueeze(-1), label  # Add feature dimension: (561,) -> (561, 1)
+
+
 class Net(nn.Module):
-    def __init__(self, d_model: int = 8, d_state: int = 4, n_layers: int = 5):
+    def __init__(self, output_size:int = 10, d_model: int = 8, d_state: int = 4, n_layers: int = 5):
         super().__init__()
         self.input_proj = nn.Linear(28, d_model, bias=False)  # row → d_model
         self.mamba_layers = nn.Sequential(
@@ -52,7 +69,7 @@ class Net(nn.Module):
                 for _ in range(n_layers)
             ]
         )
-        self.classifier = nn.Linear(d_model, 10, bias=False)  # d_model → 10
+        self.classifier = nn.Linear(d_model, output_size, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -61,7 +78,43 @@ class Net(nn.Module):
         Returns:
             logits: (B, 10)
         """
+        print(x.shape)
         x = x.squeeze(1)
+        print(x.shape)
+        x = self.input_proj(x)
+        print(x.shape)
+        x = self.mamba_layers(x)
+        print(x.shape)
+        x = x.mean(dim=1)
+        print(x.shape)
+        return self.classifier(x)
+
+
+class Net2(nn.Module):
+    def __init__(self, output_size:int = 6, d_model: int = 8, d_state: int = 4, n_layers: int = 5):
+        super().__init__()
+        self.input_proj = nn.Linear(561, d_model, bias=False)  # row → d_model
+        self.mamba_layers = nn.Sequential(
+            *[
+                ResidualMamba(
+                    d_model=d_model,
+                    d_state=d_state,
+                    d_conv=3,
+                    expand=2,
+                )
+                for _ in range(n_layers)
+            ]
+        )
+        self.classifier = nn.Linear(d_model, output_size, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (B, 561, 1)   — standard torchvision MNIST format
+        Returns:
+            logits: (B, 6)
+        """
+        x = x.transpose(1, 2)   # B, 561, 1 → B, 1, 561
         x = self.input_proj(x)
         x = self.mamba_layers(x)
         x = x.mean(dim=1)
@@ -108,7 +161,7 @@ def test(model, device, test_loader):
     test_loss /= len(test_loader.dataset)
 
     print(
-        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.1f}%)\n".format(
             test_loss,
             correct,
             len(test_loader.dataset),
@@ -261,27 +314,50 @@ def main():
         test_kwargs.update(cuda_kwargs)
         validate_kwargs.update(cuda_kwargs)
 
-    transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-    )
-    dataset1 = datasets.MNIST(
-        dataset_dir, train=True, download=True, transform=transform
-    )
-    dataset2 = datasets.MNIST(dataset_dir, train=False, transform=transform)
+    # Load dataset based on DATASET environment variable
+    dataset_type = os.environ.get("DATASET", "mnist").lower()
+    print(f"Training with dataset: {dataset_type}")
+
+    if dataset_type == "mnist":
+        output_size = 10
+        Network = Net;
+        transform = transforms.Compose(
+            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+        )
+        dataset1 = datasets.MNIST(
+            dataset_dir, train=True, download=True, transform=transform
+        )
+        dataset2 = datasets.MNIST(dataset_dir, train=False, transform=transform)
+    elif dataset_type == "har":
+        output_size = 6
+        Network = Net2;
+        har_data_dir = os.path.join(dataset_dir, "har-uci-dataset", "UCI HAR Dataset")
+
+        dataset1 = HARDataset(
+            os.path.join(har_data_dir, "train", "X_train.txt"),
+            os.path.join(har_data_dir, "train", "y_train.txt")
+        )
+        dataset2 = HARDataset(
+            os.path.join(har_data_dir, "test", "X_test.txt"),
+            os.path.join(har_data_dir, "test", "y_test.txt")
+        )
+    else:
+        sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist' or 'har'")
+
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
     validate_loader = torch.utils.data.DataLoader(dataset2, **validate_kwargs)
 
-    model_type = os.environ["MODEL"]
+    model_type = os.environ.get("MODEL", "mamba-1")
     print("Trainging model:", model_type)
 
     match model_type:
         case "mamba-1":
-            model = Net(n_layers=1).to(device)
-            model_name = "mnist-mamba-1"
+            model = Network(output_size=output_size, n_layers=1).to(device)
+            model_name = f"{dataset_type}-mamba-1"
         case "mamba-5":
-            model = Net(n_layers=5).to(device)
-            model_name = "mnist-mamba-5"
+            model = Network(output_size=output_size, n_layers=5).to(device)
+            model_name = f"{dataset_type}-mamba-5"
         case _:
             sys.exit(
                 "Please specify a correct model with the environment variable MODEL"
@@ -308,7 +384,14 @@ def main():
     torch.save(model, pt_path)
 
     if args.export_onnx:
-        dummy_input = torch.randn(1, 1, 28, 28, device=device)
+        # dummy_input is already defined above based on dataset_type
+        if dataset_type == "mnist":
+            # For MNIST: (1, 784, 1) - flattened 28x28 image as sequence
+            # dummy_input = torch.randn(1, 784, 1, device=device)
+            dummy_input = torch.randn(1, 1, 28, 28, device=device)
+        else:
+            # For HAR: (1, 561, 1) - 561 features as sequence
+            dummy_input = torch.randn(1, 561, 1, device=device)
 
         def _selective_scan_vectorized(
             u,

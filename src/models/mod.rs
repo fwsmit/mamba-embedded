@@ -1,7 +1,9 @@
 pub mod mymodel {
     include!(concat!(
         env!("OUT_DIR"),
-        "/model/mnist-",
+        "/model/",
+        env!("DATASET"),
+        "-",
         env!("MODEL"),
         ".rs"
     ));

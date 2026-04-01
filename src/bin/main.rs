@@ -14,7 +14,13 @@ use esp_hal::clock::CpuClock;
 use esp_hal::main;
 use esp_hal::time::{Duration, Instant};
 use log::info;
-use mamba_embedded::data::mnist_tensor::mnist_tensor;
+
+#[cfg(dataset_har)]
+use mamba_embedded::data::har_tensor::input_tensor;
+
+#[cfg(dataset_mnist)]
+use mamba_embedded::data::mnist_tensor::input_tensor;
+
 use mamba_embedded::mymodel::Model;
 // Set the backend to NdArray with f32
 type Backend = NdArray<f32>;
@@ -52,8 +58,19 @@ fn main() -> ! {
 
     info!("Running inference");
 
+    // Select dataset based on compile-time DATASET environment variable
+    let dataset = env!("DATASET");
+
     loop {
-        let input = mnist_tensor();
+        // Use conditional compilation to select the correct input tensor type
+        // let input = mnist_tensor();
+
+        let input = input_tensor();
+        info!("Input shape: {:?}", input.shape());
+
+        // #[cfg(not(any(feature = "dataset_mnist", feature = "dataset_har")))]
+        // let input = mnist_tensor();
+
         let inference_timer = Instant::now();
         let output = model.forward(input);
         let inference_time = inference_timer.elapsed();
@@ -62,6 +79,7 @@ fn main() -> ! {
         info!("{:?}", &output);
         let guess = output.argmax(1).into_scalar();
         info!("Guess: {:?}", guess);
+        info!("Dataset: {}", dataset);
         info!("Inference done in: {:?} ms", inference_time.as_millis());
         info!("Finished");
         let delay_start = Instant::now();

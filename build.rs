@@ -75,9 +75,22 @@ fn linker_be_nice() {
 
 fn generate_model() {
     println!("cargo::rerun-if-env-changed=MODEL");
+    println!("cargo::rerun-if-env-changed=DATASET");
     let model_type = env!("MODEL");
+    let dataset = env!("DATASET");
+
+    println!("cargo::rustc-check-cfg=cfg(dataset_mnist)");
+    println!("cargo::rustc-check-cfg=cfg(dataset_har)");
+    // Set feature flags based on dataset for conditional compilation
+    match dataset {
+        "mnist" => println!("cargo:rustc-cfg=dataset_mnist"),
+        "har" => println!("cargo:rustc-cfg=dataset_har"),
+        _ => println!("cargo:rustc-cfg=dataset_mnist"),
+    }
+
     // Generate the model code from the ONNX file.
-    let model_path = ["src/models/", "mnist", "-", model_type, ".onnx"].join("");
+    // Format: src/models/{dataset}-{model_type}.onnx (e.g., src/models/mnist-mamba-1.onnx)
+    let model_path = ["src/models/", dataset, "-", model_type, ".onnx"].join("");
     println!("cargo::rerun-if-changed={}", model_path);
 
     ModelGen::new()
