@@ -15,11 +15,7 @@ use esp_hal::main;
 use esp_hal::time::{Duration, Instant};
 use log::info;
 
-#[cfg(dataset_har)]
-use mamba_embedded::data::har_tensor::input_tensor;
-
-#[cfg(dataset_mnist)]
-use mamba_embedded::data::mnist_tensor::input_tensor;
+use mamba_embedded::data::test_tensor::input_tensor;
 
 use mamba_embedded::mymodel::Model;
 

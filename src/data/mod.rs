@@ -1,2 +1,1 @@
-pub mod mnist_tensor;
-pub mod har_tensor;
+pub mod test_tensor;

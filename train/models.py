@@ -89,7 +89,8 @@ class Net2(nn.Module):
 
 
 class TinyMambaHAR(nn.Module):
-    def __init__(self, input_dim=57, hidden_dim=64, output_size=6):
+    #def __init__(self, input_dim=57, hidden_dim=64, output_size=6):
+    def __init__(self, input_dim=57, hidden_dim=8, output_size=6):
         super().__init__()
         self.linear_in = nn.Linear(input_dim, hidden_dim)
         self.mamba = Mamba(d_model=hidden_dim)

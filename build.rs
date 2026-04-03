@@ -79,8 +79,6 @@ fn generate_model() {
     let model_type = env!("MODEL");
     let dataset = env!("DATASET");
 
-    println!("cargo::rustc-check-cfg=cfg(dataset_mnist)");
-    println!("cargo::rustc-check-cfg=cfg(dataset_har)");
     // Set feature flags based on dataset for conditional compilation
     match dataset {
         "mnist" => println!("cargo:rustc-cfg=dataset_mnist"),
