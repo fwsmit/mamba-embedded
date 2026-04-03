@@ -6,17 +6,16 @@ from __future__ import print_function
 import argparse
 import sys
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import TensorDataset, random_split
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
-import onnxruntime as ort
-import onnx
-import numpy as np
 import os
-from mamba_ssm.modules.mamba_simple import Mamba
 from enum import Enum, auto
+from .data import load_har_data
+from .models import TinyMambaHAR
+from .onnx import test_onnx
 
 dataset_dir = "./data"
 
@@ -24,101 +23,6 @@ dataset_dir = "./data"
 class Model(Enum):
     MAMBA_ONE = (auto(),)  # One layer mamba model
     MAMBA_FIVE = (auto(),)  # Five layer mamba model
-
-
-class ResidualMamba(nn.Module):
-    def __init__(self, d_model, d_state, d_conv, expand):
-        super().__init__()
-        self.mamba = Mamba(
-            d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand
-        )
-
-    def forward(self, x):
-        return x + self.mamba(x)  # residual keeps gradients healthy
-
-
-class HARDataset(torch.utils.data.Dataset):
-    """HAR UCI Dataset loader"""
-    def __init__(self, data_path, labels_path):
-        # Use genfromtxt which handles multiple spaces better
-        # Or use loadtxt without delimiter to treat all whitespace as delimiter
-        self.data = np.loadtxt(data_path, ndmin=2)  # ndmin=2 ensures 2D array
-        self.labels = np.loadtxt(labels_path, dtype=int) - 1  # Convert to 0-indexed
-        
-    def __len__(self):
-        return len(self.data)
-    
-    def __getitem__(self, idx):
-        sample = torch.from_numpy(self.data[idx]).float()
-        label = torch.tensor(self.labels[idx], dtype=torch.long)
-        return sample.unsqueeze(-1), label  # Add feature dimension: (561,) -> (561, 1)
-
-
-class Net(nn.Module):
-    def __init__(self, output_size:int = 10, d_model: int = 8, d_state: int = 4, n_layers: int = 5):
-        super().__init__()
-        self.input_proj = nn.Linear(28, d_model, bias=False)  # row → d_model
-        self.mamba_layers = nn.Sequential(
-            *[
-                ResidualMamba(
-                    d_model=d_model,
-                    d_state=d_state,
-                    d_conv=3,
-                    expand=2,
-                )
-                for _ in range(n_layers)
-            ]
-        )
-        self.classifier = nn.Linear(d_model, output_size, bias=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, 1, 28, 28)   — standard torchvision MNIST format
-        Returns:
-            logits: (B, 10)
-        """
-        print(x.shape)
-        x = x.squeeze(1)
-        print(x.shape)
-        x = self.input_proj(x)
-        print(x.shape)
-        x = self.mamba_layers(x)
-        print(x.shape)
-        x = x.mean(dim=1)
-        print(x.shape)
-        return self.classifier(x)
-
-
-class Net2(nn.Module):
-    def __init__(self, output_size:int = 6, d_model: int = 8, d_state: int = 4, n_layers: int = 5):
-        super().__init__()
-        self.input_proj = nn.Linear(561, d_model, bias=False)  # row → d_model
-        self.mamba_layers = nn.Sequential(
-            *[
-                ResidualMamba(
-                    d_model=d_model,
-                    d_state=d_state,
-                    d_conv=3,
-                    expand=2,
-                )
-                for _ in range(n_layers)
-            ]
-        )
-        self.classifier = nn.Linear(d_model, output_size, bias=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, 561, 1)   — standard torchvision MNIST format
-        Returns:
-            logits: (B, 6)
-        """
-        x = x.transpose(1, 2)   # B, 561, 1 → B, 1, 561
-        x = self.input_proj(x)
-        x = self.mamba_layers(x)
-        x = x.mean(dim=1)
-        return self.classifier(x)
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -170,46 +74,6 @@ def test(model, device, test_loader):
     )
 
 
-def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
-    # Load the ONNX model
-    tmp_model = onnx.load(onnx_path)
-    # Check that the model is well formed
-    onnx.checker.check_model(tmp_model)
-    # Print a human readable representation of the graph
-    # print(onnx.helper.printable_graph(model.graph))
-
-    comp_model.eval()
-    ort_sess = ort.InferenceSession(onnx_path)
-    i = 0
-    valid = True
-    atol = 1e-4
-    with torch.no_grad():
-        for data, _ in test_loader:
-            # data, target = data.to(device), target.to(device)
-            data_on_device = data.to(device)
-            output_target = comp_model(data_on_device)
-
-            # output = ort_sess.run(None, {'input.1': data.numpy()})
-            output = ort_sess.run(None, {"input": data.numpy()})
-            target_np = output_target.cpu().numpy()
-            are_similar = np.allclose(target_np, output, atol=atol)
-
-            if not are_similar:
-                print("Arrays are not similar for datapoint", i)
-                print("target", output_target)
-                print("result", output)
-                valid = False
-            i += 1
-
-            if not full_test and i > 100:
-                break
-
-    if not valid:
-        print("ONNX validation failed")
-        exit(1)
-    else:
-        print("ONNX validation succeeded (e <", atol, ")")
-
 
 def main():
     # Training settings
@@ -222,11 +86,11 @@ def main():
         help="input batch size for training (default: 64)",
     )
     parser.add_argument(
-        "--test-batch-size",
+        "--validate-batch-size",
         type=int,
         default=1000,
         metavar="N",
-        help="input batch size for testing (default: 1000)",
+        help="input batch size for validating (default: 1000)",
     )
     parser.add_argument(
         "--epochs",
@@ -305,14 +169,16 @@ def main():
     else:
         device = torch.device("cpu")
 
-    train_kwargs = {"batch_size": args.batch_size}
-    test_kwargs = {"batch_size": args.test_batch_size}
-    validate_kwargs = {"batch_size": 1}
+    train_kwargs = {"batch_size": args.batch_size, "shuffle": True}
+    validate_kwargs = {"batch_size": args.batch_size}
+    validate_single_kwargs = {"batch_size": 1}
+    test_kwargs = {"batch_size": args.validate_batch_size}
     if use_cuda:
-        cuda_kwargs = {"num_workers": 1, "pin_memory": True, "shuffle": True}
+        cuda_kwargs = {"num_workers": 1, "pin_memory": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
         validate_kwargs.update(cuda_kwargs)
+        validate_single_kwargs.update(cuda_kwargs)
 
     # Load dataset based on DATASET environment variable
     dataset_type = os.environ.get("DATASET", "mnist").lower()
@@ -320,40 +186,40 @@ def main():
 
     if dataset_type == "mnist":
         output_size = 10
-        Network = Net;
+        Network = Net
         transform = transforms.Compose(
             [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
         )
-        dataset1 = datasets.MNIST(
-            dataset_dir, train=True, download=True, transform=transform
+        train_ds, val_ds = random_split(
+            datasets.MNIST(dataset_dir, train=True, download=True, transform=transform),
+            [0.8, 0.2],
         )
-        dataset2 = datasets.MNIST(dataset_dir, train=False, transform=transform)
+        test_ds = datasets.MNIST(dataset_dir, train=False, transform=transform)
     elif dataset_type == "har":
         output_size = 6
-        Network = Net2;
+        Network = TinyMambaHAR
         har_data_dir = os.path.join(dataset_dir, "har-uci-dataset", "UCI HAR Dataset")
+        X_train, y_train, X_test, y_test = load_har_data(har_data_dir)
+        print(X_train.shape)
 
-        dataset1 = HARDataset(
-            os.path.join(har_data_dir, "train", "X_train.txt"),
-            os.path.join(har_data_dir, "train", "y_train.txt")
-        )
-        dataset2 = HARDataset(
-            os.path.join(har_data_dir, "test", "X_test.txt"),
-            os.path.join(har_data_dir, "test", "y_test.txt")
-        )
+        train_ds, val_ds = random_split(TensorDataset(X_train, y_train), [0.8, 0.2])
+        test_ds = TensorDataset(X_test, y_test)
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist' or 'har'")
 
-    train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
-    test_loader = torch.utils.data.DataLoader(dataset2, **test_kwargs)
-    validate_loader = torch.utils.data.DataLoader(dataset2, **validate_kwargs)
+    train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
+    test_loader = torch.utils.data.DataLoader(test_ds, **test_kwargs)
+    validate_loader = torch.utils.data.DataLoader(val_ds, **validate_kwargs)
+    validate_loader_single = torch.utils.data.DataLoader(
+        val_ds, **validate_single_kwargs
+    )
 
     model_type = os.environ.get("MODEL", "mamba-1")
     print("Trainging model:", model_type)
 
     match model_type:
         case "mamba-1":
-            model = Network(output_size=output_size, n_layers=1).to(device)
+            model = Network(output_size=output_size).to(device)
             model_name = f"{dataset_type}-mamba-1"
         case "mamba-5":
             model = Network(output_size=output_size, n_layers=5).to(device)
@@ -376,7 +242,7 @@ def main():
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
-        test(model, device, test_loader)
+        test(model, device, validate_loader)
         scheduler.step()
         if args.dry_run:
             break
@@ -391,7 +257,7 @@ def main():
             dummy_input = torch.randn(1, 1, 28, 28, device=device)
         else:
             # For HAR: (1, 561, 1) - 561 features as sequence
-            dummy_input = torch.randn(1, 561, 1, device=device)
+            dummy_input = torch.randn(1, 10, 57, device=device)
 
         def _selective_scan_vectorized(
             u,
@@ -475,7 +341,7 @@ def main():
         # model.mamba.use_fast_path = True
 
         print("Testing onnx model")
-        test_onnx(onnx_path, model, validate_loader, device, args.full_test_onnx)
+        test_onnx(onnx_path, model, validate_loader_single, device, args.full_test_onnx)
         print(
             f"ONNX model size: {os.path.getsize(onnx_path):,} bytes "
             f"({os.path.getsize(onnx_path) / 1024:.2f} KB)"
