@@ -8,13 +8,11 @@ import sys
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.utils.data import TensorDataset, random_split
-from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 import os
 from enum import Enum, auto
-from .data import load_har_data
-from .models import TinyMambaHAR
+from .data import load_har_data, load_mnist_data
+from .models import TinyMambaHAR, Net
 from .onnx import test_onnx
 
 dataset_dir = "./data"
@@ -187,23 +185,11 @@ def main():
     if dataset_type == "mnist":
         output_size = 10
         Network = Net
-        transform = transforms.Compose(
-            [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-        )
-        train_ds, val_ds = random_split(
-            datasets.MNIST(dataset_dir, train=True, download=True, transform=transform),
-            [0.8, 0.2],
-        )
-        test_ds = datasets.MNIST(dataset_dir, train=False, transform=transform)
+        train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
         output_size = 6
         Network = TinyMambaHAR
-        har_data_dir = os.path.join(dataset_dir, "har-uci-dataset", "UCI HAR Dataset")
-        X_train, y_train, X_test, y_test = load_har_data(har_data_dir)
-        print(X_train.shape)
-
-        train_ds, val_ds = random_split(TensorDataset(X_train, y_train), [0.8, 0.2])
-        test_ds = TensorDataset(X_test, y_test)
+        train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist' or 'har'")
 
