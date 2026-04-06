@@ -2,6 +2,7 @@ import onnxruntime as ort
 import onnx
 import torch
 import numpy as np
+import torch.nn.functional as F
 
 
 def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
@@ -23,6 +24,7 @@ def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
             data_on_device = data.to(device)
             output_target = comp_model(data_on_device)
 
+            # data_pad = F.pad(data, (0,0,0,11))
             # output = ort_sess.run(None, {'input.1': data.numpy()})
             output = ort_sess.run(None, {"input": data.numpy()})
             target_np = output_target.cpu().numpy()
@@ -32,6 +34,7 @@ def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
                 print("Arrays are not similar for datapoint", i)
                 print("target", output_target)
                 print("result", output)
+                print("max difference", np.max(np.absolute(output_target.cpu().numpy()-np.array(output))))
                 valid = False
             i += 1
 

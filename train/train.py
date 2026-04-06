@@ -11,8 +11,9 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 import os
 from enum import Enum, auto
-from .data import load_har_data, load_mnist_data
-from .models import TinyMambaHAR, Net
+from .data import load_har_data, load_mnist_data, load_speechcommands_data
+from .models import TinyMambaHAR, Net, MambaKWS
+from .selective_scan import _selective_scan_vectorized
 from .onnx import test_onnx
 
 dataset_dir = "./data"
@@ -70,7 +71,6 @@ def test(model, device, test_loader):
             100.0 * correct / len(test_loader.dataset),
         )
     )
-
 
 
 def main():
@@ -167,48 +167,58 @@ def main():
     else:
         device = torch.device("cpu")
 
+    # Load dataset based on DATASET environment variable
+    dataset_type = os.environ.get("DATASET")
+    print(f"Training with dataset: {dataset_type}")
+
     train_kwargs = {"batch_size": args.batch_size, "shuffle": True}
     validate_kwargs = {"batch_size": args.batch_size}
     validate_single_kwargs = {"batch_size": 1}
     test_kwargs = {"batch_size": args.validate_batch_size}
     if use_cuda:
-        cuda_kwargs = {"num_workers": 1, "pin_memory": True}
+        if dataset_type == "kws":
+            num_workers = 8
+        else:
+            num_workers = 1
+        cuda_kwargs = {"num_workers": num_workers, "pin_memory": True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
         validate_kwargs.update(cuda_kwargs)
         validate_single_kwargs.update(cuda_kwargs)
 
-    # Load dataset based on DATASET environment variable
-    dataset_type = os.environ.get("DATASET", "mnist").lower()
-    print(f"Training with dataset: {dataset_type}")
 
     if dataset_type == "mnist":
         output_size = 10
+        input_dim = 28
         Network = Net
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
         output_size = 6
+        input_dim = 57
         Network = TinyMambaHAR
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
+    elif dataset_type == "kws":
+        output_size = 35
+        input_dim = 40
+        Network = TinyMambaHAR
+        train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
-        sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist' or 'har'")
+        sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist', 'kws' or 'har'")
 
     train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
     test_loader = torch.utils.data.DataLoader(test_ds, **test_kwargs)
     validate_loader = torch.utils.data.DataLoader(val_ds, **validate_kwargs)
-    validate_loader_single = torch.utils.data.DataLoader(
-        val_ds, **validate_single_kwargs
-    )
+    validate_loader_single = torch.utils.data.DataLoader(val_ds, **validate_single_kwargs)
 
-    model_type = os.environ.get("MODEL", "mamba-1")
-    print("Trainging model:", model_type)
+    model_type = os.environ.get("MODEL")
+    print("Training model:", model_type)
 
     match model_type:
         case "mamba-1":
-            model = Network(output_size=output_size).to(device)
+            model = Network(input_dim=input_dim,output_size=output_size).to(device)
             model_name = f"{dataset_type}-mamba-1"
         case "mamba-5":
-            model = Network(output_size=output_size, n_layers=5).to(device)
+            model = Network(input_dim=input_dim, output_size=output_size, n_layers=5).to(device)
             model_name = f"{dataset_type}-mamba-5"
         case _:
             sys.exit(
@@ -241,59 +251,12 @@ def main():
             # For MNIST: (1, 784, 1) - flattened 28x28 image as sequence
             # dummy_input = torch.randn(1, 784, 1, device=device)
             dummy_input = torch.randn(1, 1, 28, 28, device=device)
+        if dataset_type == "kws":
+            dummy_input = torch.randn(1, 101, 40, device=device)
         else:
             # For HAR: (1, 561, 1) - 561 features as sequence
             dummy_input = torch.randn(1, 10, 57, device=device)
 
-        def _selective_scan_vectorized(
-            u,
-            delta,
-            A,
-            B,
-            C,
-            D=None,
-            z=None,
-            delta_bias=None,
-            delta_softplus=False,
-            return_last_state=False,
-        ):
-            if delta_bias is not None:
-                delta = delta + delta_bias.unsqueeze(-1)
-            if delta_softplus:
-                delta = F.softplus(delta)
-
-            # log_dA = delta * A  (skipping the exp entirely — it would cancel with log anyway)
-            # A has shape (d_inner, d_state), A is negative by construction (-exp(A_log))
-            log_dA = delta.unsqueeze(-1) * A.unsqueeze(0).unsqueeze(2)  # (B, d, L, N)
-
-            # dB = delta * B,  shape (B, d, L, N)
-            # B arrives as (B, d_state, L) per selective_scan_fn convention
-            dB = delta.unsqueeze(-1) * B.permute(
-                0,
-                2,
-                # (B, d, L, N)
-                1,
-            ).unsqueeze(1)
-
-            # Inclusive prefix products: P_t = exp(cumsum(delta*A, dim=L))
-            # No cumprod op used — ONNX-compatible
-            P = torch.exp(torch.cumsum(log_dA, dim=2))  # (B, d, L, N)
-
-            # Vectorised scan: h = P * cumsum(bu / P, dim=L)
-            bu = dB * u.unsqueeze(-1)  # (B, d, L, N)
-            h = P * torch.cumsum(bu / P, dim=2)  # (B, d, L, N)
-
-            # Output projection: y_t = sum_N(h_t * C_t)
-            y = (h * C.permute(0, 2, 1).unsqueeze(1)).sum(-1)  # (B, d, L)
-
-            if D is not None:
-                y = y + D.unsqueeze(0).unsqueeze(-1) * u
-            if z is not None:
-                y = y * F.silu(z)
-
-            if return_last_state:
-                return y, h[:, :, -1, :]
-            return y
 
         # use_fast_path=False alone is not enough — slow_forward still calls
         # causal_conv1d_fn and selective_scan_fn (custom CUDA extensions) via

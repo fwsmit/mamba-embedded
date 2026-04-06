@@ -104,3 +104,20 @@ class TinyMambaHAR(nn.Module):
         x = x.transpose(1, 2)  # [B, H, T]
         x = self.pool(x).squeeze(-1)
         return self.classifier(x)
+
+
+class MambaKWS(nn.Module):
+    def __init__(self, input_dim=40, hidden_dim=8, output_size=35):
+        super().__init__()
+        self.linear_in = nn.Linear(input_dim, hidden_dim)
+        self.mamba = Mamba(d_model=hidden_dim)
+        # self.mamba = nn.Linear(hidden_dim, hidden_dim)
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.classifier = nn.Linear(hidden_dim, output_size)
+
+    def forward(self, x):
+        x = self.linear_in(x)  # [B, T, H]
+        x = self.mamba(x)  # [B, T, H]
+        x = x.transpose(1, 2)  # [B, H, T]
+        x = self.pool(x).squeeze(-1)
+        return self.classifier(x)
