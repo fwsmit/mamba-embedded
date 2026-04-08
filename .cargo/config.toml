@@ -2,11 +2,14 @@
 runner = "espflash flash --monitor --chip esp32s3"
 
 [env]
-ESP_LOG="info"
+ESP_LOG = "info"
 
 [build]
 rustflags = [
-  "-C", "link-arg=-nostartfiles",
+  "-C",
+  "link-arg=-nostartfiles",
+  # "-C",
+  # "link-arg=-mtext-section-literals",
 ]
 
 target = "xtensa-esp32s3-none-elf"

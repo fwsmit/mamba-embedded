@@ -12,7 +12,7 @@ from torch.optim.lr_scheduler import StepLR
 import os
 from enum import Enum, auto
 from .data import load_har_data, load_mnist_data, load_speechcommands_data
-from .models import TinyMambaHAR, Net, MambaKWS
+from .models import TinyMambaHAR, Net
 from .selective_scan import _selective_scan_vectorized
 from .onnx import test_onnx
 
@@ -190,16 +190,19 @@ def main():
     if dataset_type == "mnist":
         output_size = 10
         input_dim = 28
+        hidden_dim = 8
         Network = Net
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
         output_size = 6
         input_dim = 57
+        hidden_dim = 16
         Network = TinyMambaHAR
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     elif dataset_type == "kws":
         output_size = 35
         input_dim = 40
+        hidden_dim = 4
         Network = TinyMambaHAR
         train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
@@ -215,10 +218,10 @@ def main():
 
     match model_type:
         case "mamba-1":
-            model = Network(input_dim=input_dim,output_size=output_size).to(device)
+            model = Network(input_dim=input_dim,hidden_dim=hidden_dim,output_size=output_size).to(device)
             model_name = f"{dataset_type}-mamba-1"
         case "mamba-5":
-            model = Network(input_dim=input_dim, output_size=output_size, n_layers=5).to(device)
+            model = Network(input_dim=input_dim, output_size=output_size, hidden_dim=hidden_dim, n_layers=5).to(device)
             model_name = f"{dataset_type}-mamba-5"
         case _:
             sys.exit(
@@ -252,7 +255,7 @@ def main():
             # dummy_input = torch.randn(1, 784, 1, device=device)
             dummy_input = torch.randn(1, 1, 28, 28, device=device)
         if dataset_type == "kws":
-            dummy_input = torch.randn(1, 101, 40, device=device)
+            dummy_input = torch.randn(1, 51, 40, device=device)
         else:
             # For HAR: (1, 561, 1) - 561 features as sequence
             dummy_input = torch.randn(1, 10, 57, device=device)
@@ -278,7 +281,7 @@ def main():
             input_names=["input"],
             output_names=["output"],
             verbose=False,
-            opset_version=None,
+            opset_version=17,
             external_data=False,
             optimize=True,
             dynamo=False,

@@ -76,7 +76,8 @@ def load_speechcommands_data(data_dir, n_mfcc=40):
         n_mfcc=n_mfcc,               # F — frequency dimension
         melkwargs={
             "n_fft": 400,            # 25 ms window at 16 kHz
-            "hop_length": 160,       # 10 ms hop  → T ≈ 101 frames per second
+            # "hop_length": 160,       # 10 ms hop  → T ≈ 101 frames per second
+            "hop_length": 320,       # 20 ms hop  → T ≈ 51 frames per second
             "n_mels": 80,
         },
     )
@@ -109,7 +110,10 @@ def load_speechcommands_data(data_dir, n_mfcc=40):
             self._ds = SPEECHCOMMANDS(data_dir, download=True, subset=subset)
 
         def __len__(self):
-            return len(self._ds)
+            # return len(self._ds)
+
+            # FIXME turn this back
+            return int(len(self._ds)/100)
 
         def __getitem__(self, idx):
             waveform, sample_rate, label, *_ = self._ds[idx]

@@ -1,3 +1,4 @@
+// use burn_onnx::LoadStrategy;
 use burn_onnx::ModelGen;
 
 fn main() {
@@ -95,5 +96,6 @@ fn generate_model() {
         .input(&model_path)
         .out_dir("model/")
         .embed_states(true)
+        // .load_strategy(LoadStrategy::Embedded)
         .run_from_script();
 }

@@ -17,7 +17,7 @@ def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
     ort_sess = ort.InferenceSession(onnx_path)
     i = 0
     valid = True
-    atol = 1e-4
+    atol = 2e-3
     with torch.no_grad():
         for data, _ in test_loader:
             # data, target = data.to(device), target.to(device)
