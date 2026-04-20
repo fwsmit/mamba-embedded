@@ -10,17 +10,11 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 import os
-from enum import Enum, auto
 from .data import load_har_data, load_mnist_data, load_speechcommands_data
-from .models import TinyMambaHAR, Net
+from .models import TinyMamba, TinyMamba3
 from .onnx import export_onnx, test_onnx
 
 dataset_dir = "./data"
-
-
-class Model(Enum):
-    MAMBA_ONE = (auto(),)  # One layer mamba model
-    MAMBA_FIVE = (auto(),)  # Five layer mamba model
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -190,19 +184,16 @@ def main():
         output_size = 10
         input_dim = 28
         hidden_dim = 8
-        Network = Net
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
         output_size = 6
         input_dim = 57
         hidden_dim = 16
-        Network = TinyMambaHAR
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     elif dataset_type == "kws":
         output_size = 35
         input_dim = 40
         hidden_dim = 4
-        Network = TinyMambaHAR
         train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist', 'kws' or 'har'")
@@ -217,16 +208,15 @@ def main():
 
     match model_type:
         case "mamba-1":
-            model = Network(input_dim=input_dim,hidden_dim=hidden_dim,output_size=output_size).to(device)
-            model_name = f"{dataset_type}-mamba-1"
-        case "mamba-5":
-            model = Network(input_dim=input_dim, output_size=output_size, hidden_dim=hidden_dim, n_layers=5).to(device)
-            model_name = f"{dataset_type}-mamba-5"
+            model = TinyMamba(input_dim=input_dim,hidden_dim=hidden_dim,output_size=output_size).to(device)
+        case "mamba3":
+            model = TinyMamba3(input_dim=input_dim,hidden_dim=hidden_dim,output_size=output_size).to(device)
         case _:
             sys.exit(
                 "Please specify a correct model with the environment variable MODEL"
             )
 
+    model_name = f"{dataset_type}-{model_type}"
     dry_run_name = ""
     model_dir = os.path.join("./src", "models")
     if args.dry_run:

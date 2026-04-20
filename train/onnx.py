@@ -3,7 +3,8 @@ import onnx
 import torch
 import numpy as np
 import torch.nn.functional as F
-from .selective_scan import _selective_scan_vectorized
+from .mamba_cpu_funcs import _selective_scan_vectorized
+from mamba_ssm.ops.triton.layernorm_gated import rms_norm_ref
 
 
 def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
@@ -61,19 +62,16 @@ def export_onnx(model, dataset_type, onnx_path, device):
         # For HAR: (1, 561, 1) - 561 features as sequence
         dummy_input = torch.randn(1, 10, 57, device=device)
 
-
-    # use_fast_path=False alone is not enough — slow_forward still calls
-    # causal_conv1d_fn and selective_scan_fn (custom CUDA extensions) via
-    # module-level references that ONNX tracing cannot follow.
-    # Temporarily null them out to force the pure-PyTorch fallback branches.
+    # Patch out some triton kernels with CPU implementations
     import mamba_ssm.modules.mamba_simple as _mamba_mod
-
+    import mamba_ssm.ops.triton.layernorm_gated as _ln_mod
     _orig_ccf = _mamba_mod.causal_conv1d_fn
-    # _orig_ssf = _mamba_mod.selective_scan_fn
+    _orig_rms = _ln_mod.rmsnorm_fn
 
     _mamba_mod.causal_conv1d_fn = None
     _mamba_mod.selective_scan_fn = _selective_scan_vectorized
-    # model.mamba.use_fast_path = False
+    _ln_mod.rmsnorm_fn = rms_norm_ref
+
 
     torch.onnx.export(
         model,
@@ -88,8 +86,5 @@ def export_onnx(model, dataset_type, onnx_path, device):
         dynamo=False,
     )
 
-    # Restore for any subsequent inference / training
     _mamba_mod.causal_conv1d_fn = _orig_ccf
-    # _mamba_mod.selective_scan_fn = _orig_ssf
-    # model.mamba.use_fast_path = True
-
+    _ln_mod.rmsnorm_fn = _orig_rms
