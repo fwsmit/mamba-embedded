@@ -41,7 +41,7 @@ def load_har_data(data_dir):
     y_train = torch.tensor(y_train, dtype=torch.long)
     y_test = torch.tensor(y_test, dtype=torch.long)
 
-    train_ds, val_ds = random_split(TensorDataset(X_train, y_train), [0.8, 0.2])
+    train_ds, val_ds = random_split(TensorDataset(X_train, y_train), [0.8, 0.2], generator=torch.Generator().manual_seed(42))
     test_ds = TensorDataset(X_test, y_test)
     return train_ds, val_ds, test_ds
 

@@ -43,7 +43,8 @@ fn main() -> ! {
     // Initialize allocator with a size
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
 
-    esp_println::logger::init_logger_from_env();
+    //esp_println::logger::init_logger_from_env();
+    esp_println::logger::init_logger(log::LevelFilter::Debug);
     info!("Started");
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -92,12 +93,18 @@ fn main() -> ! {
 
     info!("Average stats:");
     info!(
-        "Peak memory: {} (paint) {} (allocator)",
+        "Peak memory: {} (paint) {} (allocator), {} (added)",
         peak_usage_paint / n_loops,
         peak_usage_alloc / n_loops,
+        (peak_usage_paint + peak_usage_alloc) / n_loops,
     );
     info!("Latency {} (avg)", latency_total / n_loops as u64);
+    // Print line for the python program to detect. Note that an empty line is needed to flush a buffer
+    info!("INFERENCE_OK");
+    info!("");
+
     info!("Finished");
+
     loop {
         let delay_start = Instant::now();
         while delay_start.elapsed() < Duration::from_millis(500) {}

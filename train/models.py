@@ -53,12 +53,14 @@ class Net(nn.Module):
 
 
 class TinyMamba(nn.Module):
-    def __init__(self, input_dim=57, hidden_dim=64, output_size=6):
+    def __init__( self, input_dim=57, d_model=64, d_state=16, d_conv=4, expand=2, output_size=6):
         super().__init__()
-        self.linear_in = nn.Linear(input_dim, hidden_dim)
-        self.mamba = Mamba(d_model=hidden_dim)
+        self.linear_in = nn.Linear(input_dim, d_model)
+        self.mamba = Mamba(
+            d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand
+        )
         self.pool = nn.AdaptiveAvgPool1d(1)
-        self.classifier = nn.Linear(hidden_dim, output_size)
+        self.classifier = nn.Linear(d_model, output_size)
 
     def forward(self, x):
         x = self.linear_in(x)  # [B, T, H]
@@ -67,22 +69,25 @@ class TinyMamba(nn.Module):
         x = self.pool(x).squeeze(-1)
         return self.classifier(x)
 
+    def approx_params(self):
+        return 3*self.mamba.expand*self.mamba.d_model**2
+
+
 
 class TinyMamba3(nn.Module):
-    def __init__(self, input_dim=57, hidden_dim=64, output_size=6):
+    def __init__(self, input_dim=57, d_model=64, headdim=32, d_state=32, expand=2, output_size=6):
         super().__init__()
-        self.linear_in = nn.Linear(input_dim, hidden_dim)
+        self.linear_in = nn.Linear(input_dim, d_model)
         self.mamba = Mamba3(
-            d_model=hidden_dim,
-            d_state=8,
-            headdim=16,
+            d_model=d_model,
+            d_state=d_state,
+            headdim=headdim,
+            expand=expand,
             is_mimo=False,
-            chunk_size=8,
-            is_outproj_norm=False,
             dtype=torch.float32,
         )
         self.pool = nn.AdaptiveAvgPool1d(1)
-        self.classifier = nn.Linear(hidden_dim, output_size)
+        self.classifier = nn.Linear(d_model, output_size)
 
         import mamba_ssm.ops.triton.mamba3.mamba3_siso_combined as _combined_mod
 

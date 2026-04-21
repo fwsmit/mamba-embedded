@@ -17,7 +17,7 @@ from .onnx import export_onnx, test_onnx
 dataset_dir = "./data"
 
 
-def train(args, model, device, train_loader, optimizer, epoch):
+def train(model, device, train_loader, optimizer, epoch, print_stats=False, log_interval=10, dry_run=False):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
@@ -26,7 +26,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
         loss = F.cross_entropy(output, target)
         loss.backward()
         optimizer.step()
-        if batch_idx % args.log_interval == 0:
+        if print_stats and batch_idx % log_interval == 0:
             print(
                 "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
                     epoch,
@@ -36,11 +36,11 @@ def train(args, model, device, train_loader, optimizer, epoch):
                     loss.item(),
                 )
             )
-            if args.dry_run:
+            if dry_run:
                 break
 
 
-def test(model, device, test_loader):
+def test(model, device, test_loader, print_stats=False):
     model.eval()
     test_loss = 0
     correct = 0
@@ -56,14 +56,16 @@ def test(model, device, test_loader):
 
     test_loss /= len(test_loader.dataset)
 
-    print(
-        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.1f}%)\n".format(
-            test_loss,
-            correct,
-            len(test_loader.dataset),
-            100.0 * correct / len(test_loader.dataset),
+    if (print_stats):
+        print(
+            "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.1f}%)\n".format(
+                test_loss,
+                correct,
+                len(test_loader.dataset),
+                100.0 * correct / len(test_loader.dataset),
+            )
         )
-    )
+    return correct / len(test_loader.dataset)
 
 
 def main():
@@ -93,9 +95,9 @@ def main():
     parser.add_argument(
         "--lr",
         type=float,
-        default=1.0,
+        default=0.02,
         metavar="LR",
-        help="learning rate (default: 1.0)",
+        help="learning rate (default: 0.02)",
     )
     parser.add_argument(
         "--gamma",
@@ -183,34 +185,37 @@ def main():
     if dataset_type == "mnist":
         output_size = 10
         input_dim = 28
-        hidden_dim = 8
+        d_model = 8
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
         output_size = 6
         input_dim = 57
-        hidden_dim = 16
+        d_model = 8
+        d_state = 16
+        d_conv = 4
+        expand = 2
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     elif dataset_type == "kws":
         output_size = 35
         input_dim = 40
-        hidden_dim = 4
+        d_model = 4
         train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist', 'kws' or 'har'")
 
     train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
-    test_loader = torch.utils.data.DataLoader(test_ds, **test_kwargs)
+    _ = torch.utils.data.DataLoader(test_ds, **test_kwargs)  # Test loader is not used yet
     validate_loader = torch.utils.data.DataLoader(val_ds, **validate_kwargs)
     validate_loader_single = torch.utils.data.DataLoader(val_ds, **validate_single_kwargs)
 
     model_type = os.environ.get("MODEL")
-    print(f"Training model: {model_type}, hidden dim: {hidden_dim}")
+    print(f"Training model: {model_type}, hidden dim: {d_model}")
 
     match model_type:
         case "mamba-1":
-            model = TinyMamba(input_dim=input_dim,hidden_dim=hidden_dim,output_size=output_size).to(device)
+            model = TinyMamba(input_dim=input_dim,d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, output_size=output_size).to(device)
         case "mamba3":
-            model = TinyMamba3(input_dim=input_dim,hidden_dim=hidden_dim,output_size=output_size).to(device)
+            model = TinyMamba3(input_dim=input_dim,hidden_dim=d_model,output_size=output_size).to(device)
         case _:
             sys.exit(
                 "Please specify a correct model with the environment variable MODEL"
@@ -225,12 +230,21 @@ def main():
 
     onnx_path = os.path.join(model_dir, model_name + dry_run_name + ".onnx")
     pt_path = os.path.join(model_dir, model_name + dry_run_name + ".pt")
-    optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
-        test(model, device, validate_loader)
+        train(
+            model,
+            device,
+            train_loader,
+            optimizer,
+            epoch,
+            True,
+            log_interval=args.log_interval,
+            dry_run=args.dry_run,
+        )
+        test(model, device, validate_loader, print_stats=True)
         scheduler.step()
         if args.dry_run:
             break
