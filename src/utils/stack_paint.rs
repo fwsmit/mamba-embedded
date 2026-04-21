@@ -27,7 +27,7 @@ unsafe extern "C" {
 /// Writes to stack memory below the current frame. The `PAINT_GUARD_BYTES`
 /// margin keeps us from touching live data, but call this before any
 /// non-trivial work is pushed onto the stack.
-pub unsafe fn paint() {
+pub unsafe fn paint_stack() {
     // Use a local variable's address as a conservative approximation of SP.
     let local: u8 = 0;
     let current_sp = core::ptr::addr_of!(local) as usize;

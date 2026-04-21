@@ -38,7 +38,7 @@ fn main() -> ! {
     // -----------------------------------------------------------------------
     // SAFETY: called at the very top of main, before the heap allocator or any
     // large local variables are initialised.
-    unsafe { paint() };
+    unsafe { paint_stack() };
 
     // Initialize allocator with a size
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
