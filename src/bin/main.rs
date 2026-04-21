@@ -131,8 +131,9 @@ fn main() -> ! {
     info!("Running inference");
 
     let dataset = env!("DATASET");
+    let n_loops = 5;
 
-    loop {
+    for i in 0..n_loops {
         let input = input_tensor();
         info!("Input shape: {:?}", input.shape());
 
@@ -156,8 +157,9 @@ fn main() -> ! {
         let stats: HeapStats = esp_alloc::HEAP.stats();
         info!("Peak stack usage: {} bytes", peak);
         info!("Peak stack usage (heapstats){}", stats.max_usage);
-
-        info!("Finished");
+    }
+    info!("Finished");
+    loop {
         let delay_start = Instant::now();
         while delay_start.elapsed() < Duration::from_millis(500) {}
     }
