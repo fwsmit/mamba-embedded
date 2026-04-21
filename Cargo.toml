@@ -23,7 +23,7 @@ esp-backtrace = { version = "0.18.1", features = [
 #   "ndarray",
 # ] }
 esp-println = { version = "0.16.1", features = ["esp32s3", "log-04"] }
-esp-alloc = "0.9.0"
+esp-alloc = { version = "0.9.0", features = ["internal-heap-stats"] }
 burn = { version = "0.21.0-pre.1", default-features = false, features = [
   "ndarray",
 ] }

@@ -9,6 +9,7 @@
 
 use burn::backend::NdArray;
 
+use esp_alloc::HeapStats;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::main;
@@ -16,7 +17,6 @@ use esp_hal::time::{Duration, Instant};
 use log::info;
 
 use mamba_embedded::data::test_tensor::input_tensor;
-
 use mamba_embedded::mymodel::Model;
 
 // Set the backend to NdArray with f32
@@ -33,6 +33,8 @@ type Backend = NdArray<f32>;
 //   xtensa-esp32s3-elf-nm target/.../firmware | grep -i stack
 // ---------------------------------------------------------------------------
 mod stack_watermark {
+    use log::info;
+
     /// Byte written across the unpainted stack at startup.
     const PATTERN: u8 = 0xAA;
 
@@ -151,7 +153,9 @@ fn main() -> ! {
         // -----------------------------------------------------------------------
         // SAFETY: paint() was called at entry to main.
         let peak = unsafe { stack_watermark::peak_bytes() };
+        let stats: HeapStats = esp_alloc::HEAP.stats();
         info!("Peak stack usage: {} bytes", peak);
+        info!("Peak stack usage (heapstats){}", stats.max_usage);
 
         info!("Finished");
         let delay_start = Instant::now();
