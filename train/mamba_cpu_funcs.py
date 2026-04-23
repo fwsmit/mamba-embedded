@@ -596,8 +596,8 @@ def _selective_scan_vectorized(
             else:
                 # y = torch.einsum('bdn,bdn->bd', x, C[:, :, :, i])
                 y = (x * C[:, :, :, i]).sum(dim=-1)
-        if i == u.shape[2] - 1:
-            last_state = x
+        #if i + 1 == u.shape[2]:
+        last_state = x
         if y.is_complex():
             y = y.real * 2
         ys.append(y)

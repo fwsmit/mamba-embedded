@@ -3,19 +3,16 @@ import os
 import optuna
 from optuna.trial import TrialState
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
-from torchvision import datasets
-from torchvision import transforms
-import subprocess, re
-from contextlib import suppress
-import threading, time
+import subprocess
+import re
+import time
 
 from .models import TinyMamba, TinyMamba3
 from .data import load_har_data, load_mnist_data, load_speechcommands_data
 from .train import train, test
+from .onnx import export_onnx
 
 
 DEVICE = torch.device("cuda")
@@ -35,11 +32,17 @@ def parse_device_result(output: str) -> tuple[bool, float | None]:
     return False, None
 
 
-def run_on_device(cwd: str, timeout: float = 120.0) -> tuple[bool, float | None]:
+def run_on_device(onnx_path: str, timeout: float = 120.0) -> tuple[bool, float | None]:
+    env = {
+        **os.environ,
+        "MODEL": "trial-model",
+        "DATASET": "har",
+    }
     proc = subprocess.Popen(
         ["cargo", "run", "--release", "--quiet"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        env=env,
         text=True,
         # cwd=cwd,
     )
@@ -51,12 +54,16 @@ def run_on_device(cwd: str, timeout: float = 120.0) -> tuple[bool, float | None]
         
         for line in proc.stdout:
             output_lines.append(line)
-            print(line)
+            # print(line)
             if any(s in line for s in ("INFERENCE_OK", "INFERENCE_OOM", "panicked at")):
-                print("program finished, killing")
+                # print("program finished, killing")
                 break
             if time.monotonic() > deadline:
                 break
+    except KeyboardInterrupt:
+        proc.kill()
+        proc.wait()
+        raise  # let it propagate to Optuna
     finally:
         proc.kill()
         proc.wait()   # reap the process so it doesn't zombie
@@ -95,49 +102,60 @@ def define_mamba3_model(trial):
 
 
 def objective(trial):
-    # Generate the model.
-    model = define_mamba3_model(trial).to(DEVICE)
+    try:
+        # Generate the model.
+        model = define_mamba1_model(trial).to(DEVICE)
 
-    # Generate the optimizers.
-    optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
-    lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
-    optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
+        # Generate the optimizers.
+        optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
+        lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+        optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
 
-    # Get the FashionMNIST dataset.
-    # train_loader, valid_loader = get_mnist()
-    train_ds, valid_ds, _ = load_har_data(dataset_dir)
+        # Get the FashionMNIST dataset.
+        # train_loader, valid_loader = get_mnist()
+        train_ds, valid_ds, _ = load_har_data(dataset_dir)
 
-    train_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True, "shuffle": True}
-    validate_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True}
-    train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
-    valid_loader = torch.utils.data.DataLoader(valid_ds, **validate_kwargs)
-
-
-    MAX_PARAMS = 3 * 2 * 64**2  # assume max hidden dim = 64
-    # size_ratio = MAX_PARAMS / model.approx_params()
-    # alpha = 0.25  # memory pressure parameter
+        train_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True, "shuffle": True}
+        validate_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True}
+        train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
+        valid_loader = torch.utils.data.DataLoader(valid_ds, **validate_kwargs)
 
 
-    # Training of the model.
-    for epoch in range(EPOCHS):
+        MAX_PARAMS = 3 * 2 * 64**2  # assume max hidden dim = 64
+        # size_ratio = MAX_PARAMS / model.approx_params()
+        # alpha = 0.25  # memory pressure parameter
 
-        train(model, DEVICE, train_loader, optimizer, epoch)
-        accuracy = test(model, DEVICE, valid_loader)
 
-        trial.report(accuracy, epoch)
+        # Training of the model.
+        for epoch in range(EPOCHS):
 
-        # Handle pruning based on the intermediate value.
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
+            train(model, DEVICE, train_loader, optimizer, epoch)
+            accuracy = test(model, DEVICE, valid_loader)
 
-    # metric = accuracy * size_ratio ** alpha
-    metric = accuracy
-    return metric
+            trial.report(accuracy, epoch)
+
+            # Handle pruning based on the intermediate value.
+            if trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
+
+        onnx_path = "src/models/har-trial-model.onnx"
+        export_onnx(model, "har", onnx_path, DEVICE)
+
+        success, latency_us = run_on_device(onnx_path)      # flash + parse
+        if not success:
+            print("Model didn't run succesfully on the MCU")
+            raise optuna.TrialPruned()
+        # metric = accuracy * size_ratio ** alpha
+        metric = accuracy
+        return metric
+    except KeyboardInterrupt:
+        study.stop()
+        raise
 
 if __name__ == "__main__":
-    success, latency = run_on_device("")
-    print(f"Success {success}, latency {latency}")
-    exit(0)
+    # success, latency = run_on_device("src/models/har-mamba-1.onnx")
+    # print(f"Success {success}, latency {latency}")
+    # exit(0)
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=25, timeout=600)
 
