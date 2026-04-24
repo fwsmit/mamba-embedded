@@ -26,6 +26,9 @@ N_TRAIN_EXAMPLES = BATCHSIZE * 30
 N_VALID_EXAMPLES = BATCHSIZE * 10
 dataset_dir = "./data"
 
+STUDY_NAME = "mamba1-har-arch-search"
+STORAGE_URL = f"sqlite:///optuna_{STUDY_NAME}.db"
+
 
 def parse_device_result(output: str) -> tuple[bool, float | None]:
     if "panicked at" in output:
@@ -168,7 +171,12 @@ if __name__ == "__main__":
     # success, latency = run_on_device()
     # print(f"Success {success}, latency {latency}")
     # exit(0)
-    study = optuna.create_study(direction="maximize")
+    study = optuna.create_study(
+        study_name=STUDY_NAME,
+        storage=STORAGE_URL,
+        direction="maximize",
+        load_if_exists=True,
+    )
     study.optimize(objective, n_trials=30, timeout=600)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
