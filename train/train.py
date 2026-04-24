@@ -190,7 +190,7 @@ def main():
     elif dataset_type == "har":
         output_size = 6
         input_dim = 57
-        d_model = 8
+        d_model = 24
         d_state = 16
         d_conv = 4
         expand = 2
