@@ -25,9 +25,10 @@ EPOCHS = 20
 N_TRAIN_EXAMPLES = BATCHSIZE * 30
 N_VALID_EXAMPLES = BATCHSIZE * 10
 dataset_dir = "./data"
+MODEL = "mamba3"
 
-STUDY_NAME = "mamba1-har-arch-search"
-STORAGE_URL = f"sqlite:///optuna_{STUDY_NAME}.db"
+STUDY_NAME = f"{MODEL}-har"
+STORAGE_URL = "sqlite:///mamba_hpo.db"
 
 
 def parse_device_result(output: str) -> tuple[bool, float | None]:
@@ -126,7 +127,10 @@ def define_mamba3_model(trial):
 
 def objective(trial):
     # Generate the model.
-    model = define_mamba1_model(trial).to(DEVICE)
+    if MODEL == "mamba1":
+        model = define_mamba1_model(trial).to(DEVICE)
+    else:
+        model = define_mamba3_model(trial).to(DEVICE)
 
     # Generate the optimizers.
     optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
@@ -149,11 +153,11 @@ def objective(trial):
         train(model, DEVICE, train_loader, optimizer, epoch)
         accuracy = test(model, DEVICE, valid_loader)
 
-        trial.report(accuracy, epoch)
+        # trial.report(accuracy, epoch)
 
         # Handle pruning based on the intermediate value.
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
+        # if trial.should_prune():
+        #     raise optuna.exceptions.TrialPruned()
 
     onnx_path = "src/models/har-trial-model.onnx"
     export_onnx(model, "har", onnx_path, DEVICE)
@@ -163,21 +167,18 @@ def objective(trial):
         params_str = ", ".join(f"{k}={v}" for k, v in trial.params.items())
         print(f"Model didn't run successfully on the MCU ({params_str})")
         raise optuna.exceptions.TrialPruned()
-    # metric = accuracy * size_ratio ** alpha
-    metric = accuracy
-    return metric
+    return accuracy, latency_ms
 
 if __name__ == "__main__":
-    # success, latency = run_on_device()
-    # print(f"Success {success}, latency {latency}")
-    # exit(0)
     study = optuna.create_study(
         study_name=STUDY_NAME,
         storage=STORAGE_URL,
-        direction="maximize",
+        directions=["maximize", "minimize"],
+        sampler=optuna.samplers.NSGAIISampler(),
         load_if_exists=True,
     )
-    study.optimize(objective, n_trials=30, timeout=600)
+    study.set_metric_names(["Accuracy", "Latency"])
+    study.optimize(objective, n_trials=30, timeout=3600)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
@@ -187,9 +188,11 @@ if __name__ == "__main__":
     print(f"  Pruned trials   : {len(pruned_trials)}")
     print(f"  Complete trials : {len(complete_trials)}")
 
-    print("\n── Best trial ────────────────────────────────")
-    trial = study.best_trial
-    print(f"  Accuracy : {trial.value:.6f}")
-    print("  Params   :")
-    for key, value in trial.params.items():
-        print(f"    {key:<12} = {value}")
+    print("\n── Best trials ────────────────────────────────")
+    for trial in study.best_trials:
+        print("\n── Trial ────────────────────────────────")
+        print(f"  Accuracy : {trial.values[0]:.6f}")
+        print(f"  Latency   : {trial.values[1]:.6f}")   # e.g. second objective
+        print("  Params   :")
+        for key, value in trial.params.items():
+            print(f"    {key:<12} = {value}")

@@ -31,3 +31,5 @@ __pycache__
 *.pt
 src/data/test_tensor.rs
 /data/
+/figures/
+mamba_hpo.db
