@@ -20,7 +20,7 @@ DEVICE = torch.device("cuda")
 BATCHSIZE = 128
 # CLASSES = 10
 # DIR = os.getcwd()
-EPOCHS = 80
+EPOCHS = 20
 N_TRAIN_EXAMPLES = BATCHSIZE * 30
 N_VALID_EXAMPLES = BATCHSIZE * 10
 dataset_dir = "./data"
@@ -124,7 +124,7 @@ def define_mamba1_model():
 #     return model
 
 
-def train_model_har(seed):
+def train_model_and_test_accuracy(seed):
     torch.manual_seed(seed)
     # Generate the model.
     if MODEL == "mamba1":
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     print("Measuring variance")
     print(f"Training for {EPOCHS} epochs")
     seeds = range(10)
-    accuracies = [train_model_har(seed=s) for s in seeds]
+    accuracies = [train_model_and_test_accuracy(seed=s) for s in seeds]
 
     sigma_total = np.std(accuracies, ddof=1)
     target_ci = 0.005

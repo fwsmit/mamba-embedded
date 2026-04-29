@@ -11,7 +11,7 @@ import re
 import time
 import pty
 
-from .models import TinyMamba, TinyMamba3
+from .models import TinyMambaMulti, TinyMamba3Multi
 from .data import load_har_data, load_mnist_data, load_speechcommands_data
 from .train import train, test
 from .onnx import export_onnx
@@ -27,7 +27,7 @@ N_VALID_EXAMPLES = BATCHSIZE * 10
 dataset_dir = "./data"
 MODEL = "mamba3"
 
-STUDY_NAME = f"{MODEL}-har"
+STUDY_NAME = f"{MODEL}-har-multi-layer"
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
 
@@ -97,29 +97,40 @@ def run_on_device(timeout: float = 120.0):
 
 
 def define_mamba1_model(trial):
-    d_model = trial.suggest_int("d_model", 8, 24, step=4)
-    d_state = trial.suggest_int("d_state", 8, 16, step=2)
+    d_model = trial.suggest_int("d_model", 8, 32)
+    d_state = trial.suggest_int("d_state", 8, 16)
     d_conv = trial.suggest_int("d_conv", 2, 4)
     expand = trial.suggest_int("expand", 1, 4)
-    model = TinyMamba(57, d_model, d_state, d_conv, expand, 6)
+    n_layers = trial.suggest_int("n_layers", 1, 10)
+    model = TinyMambaMulti(
+        input_dim=57,
+        d_model=d_model,
+        d_state=d_state,
+        d_conv=d_conv,
+        expand=expand,
+        n_layers=n_layers,
+        output_size=6,
+    )
     return model
 
 
 def define_mamba3_model(trial):
     d_model = trial.suggest_int("d_model", 8, 32, step=4)
     d_state = trial.suggest_int("d_state", 8, 16, step=2)
-    expand = 2
+    expand = trial.suggest_int("expand", 1, 4)
+    n_layers = trial.suggest_int("n_layers", 1, 10)
     d_inner = d_model * expand
     nheads  = trial.suggest_categorical("nheads", [1, 2, 4, 8])
-    if d_inner % nheads != 0:
+    if d_inner % (2 * nheads) != 0:
         raise optuna.exceptions.TrialPruned()
     headdim = d_inner // nheads
-    model = TinyMamba3(
+    model = TinyMamba3Multi(
         57,
         d_model=d_model,
         d_state=d_state,
         headdim=headdim,
         expand=expand,
+        n_layers=n_layers,
         output_size=6,
     )
     return model
@@ -150,7 +161,7 @@ def objective(trial):
 
     # Training of the model.
     for epoch in range(EPOCHS):
-        train(model, DEVICE, train_loader, optimizer, epoch)
+        train(model, DEVICE, train_loader, optimizer, epoch, print_stats=True)
         accuracy = test(model, DEVICE, valid_loader)
 
         # trial.report(accuracy, epoch)
@@ -178,7 +189,7 @@ if __name__ == "__main__":
         load_if_exists=True,
     )
     study.set_metric_names(["Accuracy", "Latency"])
-    study.optimize(objective, n_trials=30, timeout=3600)
+    study.optimize(objective, n_trials=100, timeout=3600)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])

@@ -27,7 +27,7 @@ def fig_path(name):
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_URL       = "sqlite:///mamba_hpo.db"
-STUDY_M1     = "mamba1-har"
+STUDY_M1     = "mamba1-har-multi-layer"
 STUDY_M3     = "mamba3-har"
 
 COLOR_M1     = "#4C9BE8"   # blue  – Mamba-1
@@ -462,6 +462,164 @@ ax6.set_title("Summary: Pareto Front Statistics", fontsize=12, fontweight="bold"
 fig6.tight_layout()
 fig6.savefig(fig_path("fig6_summary_table.png"), dpi=FIG_DPI, bbox_inches="tight")
 print("Saved figures/fig6_summary_table.png")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Figure 7 – Hyperparameter Importance  (per objective, both studies)
+# ═══════════════════════════════════════════════════════════════════════════════
+OBJECTIVE_NAMES = ["Accuracy", "Latency"]   # human-readable names for values[0], values[1]
+OBJ_COLORS      = ["#5B8DD9", "#E8834C"]    # blue=accuracy, orange=latency
+
+def get_importances(study, obj_idx):
+    """Return {param: importance} for a given objective index."""
+    try:
+        imp = optuna.importance.get_param_importances(
+            study,
+            target=lambda t: t.values[obj_idx],
+        )
+        return dict(imp)
+    except Exception as e:
+        print(f"  Warning: importance failed for obj {obj_idx}: {e}")
+        return {}
+
+fig7, axes7 = plt.subplots(1, 2, figsize=(14, 5), sharey=False)
+
+for ax, study, study_name, bar_colors in zip(
+    axes7,
+    [study_m1, study_m3],
+    [STUDY_M1, STUDY_M3],
+    [[PARETO_M1, PARETO_M3], [COLOR_M1, COLOR_M3]],   # use distinct shades per study
+):
+    imp_per_obj = [get_importances(study, i) for i in range(len(OBJECTIVE_NAMES))]
+
+    # Union of all params, sorted by mean importance descending
+    all_params = sorted(
+        set().union(*[d.keys() for d in imp_per_obj]),
+        key=lambda p: np.mean([d.get(p, 0) for d in imp_per_obj]),
+    )
+
+    if not all_params:
+        ax.text(0.5, 0.5, "Not enough trials\nfor importance estimate",
+                ha="center", va="center", transform=ax.transAxes, fontsize=11)
+        ax.set_title(study_name, fontsize=11, fontweight="bold")
+        continue
+
+    n_params   = len(all_params)
+    n_obj      = len(OBJECTIVE_NAMES)
+    bar_height = 0.35
+    y_positions = np.arange(n_params)
+
+    for obj_idx, (obj_name, imp_dict) in enumerate(zip(OBJECTIVE_NAMES, imp_per_obj)):
+        values = [imp_dict.get(p, 0.0) for p in all_params]
+        offset = (obj_idx - (n_obj - 1) / 2) * bar_height
+        bars = ax.barh(
+            y_positions + offset, values,
+            height=bar_height,
+            color=OBJ_COLORS[obj_idx],
+            alpha=0.85,
+            label=obj_name,
+        )
+        # Value labels
+        for bar, v in zip(bars, values):
+            if v > 0.005:
+                ax.text(v + 0.004, bar.get_y() + bar.get_height() / 2,
+                        f"{v:.2f}", va="center", fontsize=7.5)
+
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(all_params, fontsize=9)
+    ax.set_xlabel("Hyperparameter Importance", fontsize=10)
+    ax.set_title(study_name, fontsize=11, fontweight="bold")
+    ax.legend(fontsize=9, title="Objective", title_fontsize=8)
+    ax.grid(True, axis="x", alpha=0.3, linestyle="--")
+    ax.set_xlim(left=0)
+
+fig7.suptitle("Hyperparameter Importance by Objective", fontsize=13, fontweight="bold")
+fig7.tight_layout()
+fig7.savefig(fig_path("fig7_hp_importance.png"), dpi=FIG_DPI, bbox_inches="tight")
+print("Saved figures/fig7_hp_importance.png")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Figure 8 – Terminator Improvement  (expected improvement + regret bound)
+# ═══════════════════════════════════════════════════════════════════════════════
+def compute_terminator_series(study):
+    """
+    Compute per-trial terminator improvement and regret-bound error using
+    optuna.terminator if available, otherwise fall back to hypervolume delta.
+    Returns (trial_numbers, improvements, errors).
+    """
+    try:
+        from optuna.terminator import (
+            RegretBoundEvaluator,
+            TerminatorImprovementEvaluator,
+        )
+        imp_eval = TerminatorImprovementEvaluator()
+        err_eval = RegretBoundEvaluator()
+
+        completed = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+        trial_nums, improvements, errors = [], [], []
+
+        for i in range(2, len(completed) + 1):   # need at least 2 trials
+            subset = completed[:i]
+            try:
+                imp = imp_eval.evaluate(trials=subset, study_direction=None)
+                err = err_eval.evaluate(trials=subset, study_direction=None)
+            except Exception:
+                try:
+                    # Older API: evaluate(study)
+                    imp = imp_eval.evaluate(study)
+                    err = err_eval.evaluate(study)
+                except Exception:
+                    continue
+            trial_nums.append(subset[-1].number)
+            improvements.append(float(imp))
+            errors.append(float(err))
+
+        if trial_nums:
+            return np.array(trial_nums), np.array(improvements), np.array(errors)
+    except ImportError:
+        pass
+
+    # ── Fallback: hypervolume delta ──────────────────────────────────────────
+    df  = trials_df(study)
+    ref_lat = df["latency"].max() * 1.1
+    ns, hvs = compute_hypervolume_history(df, 0.0, ref_lat)
+    delta    = np.abs(np.diff(hvs, prepend=hvs[0]))
+    # Smooth error estimate: rolling std of delta
+    window   = max(3, len(delta) // 8)
+    errors   = pd.Series(delta).rolling(window, min_periods=1).std().fillna(0).values
+    return ns, delta, errors
+
+fig8, axes8 = plt.subplots(1, 2, figsize=(14, 4), sharey=False)
+
+for ax, study, study_name, imp_color, err_color in zip(
+    axes8,
+    [study_m1, study_m3],
+    [STUDY_M1, STUDY_M3],
+    [PARETO_M1, PARETO_M3],
+    [COLOR_M1, COLOR_M3],
+):
+    trial_ns, improvements, errors = compute_terminator_series(study)
+
+    if len(trial_ns) == 0:
+        ax.text(0.5, 0.5, "Not enough trials", ha="center", va="center",
+                transform=ax.transAxes, fontsize=11)
+    else:
+        ax.plot(trial_ns, improvements, color=imp_color, linewidth=2,
+                marker="o", markersize=4, label="Terminator Improvement")
+        ax.plot(trial_ns, errors, color=err_color, linewidth=2,
+                marker="o", markersize=4, label="Regret Bound / Error")
+        ax.axhline(0, color="grey", linewidth=0.8, linestyle="--", alpha=0.5)
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3, linestyle="--")
+
+    ax.set_xlabel("Trial", fontsize=10)
+    ax.set_ylabel("Terminator Improvement", fontsize=10)
+    ax.set_title(study_name, fontsize=11, fontweight="bold")
+
+fig8.suptitle("Terminator Improvement Plot  (Accuracy ↑ · Latency ↓)",
+              fontsize=13, fontweight="bold")
+fig8.tight_layout()
+fig8.savefig(fig_path("fig8_terminator.png"), dpi=FIG_DPI, bbox_inches="tight")
+print("Saved figures/fig8_terminator.png")
 
 print("\nAll figures saved. Done.")
 plt.show()

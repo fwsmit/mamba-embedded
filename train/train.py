@@ -11,7 +11,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 import os
 from .data import load_har_data, load_mnist_data, load_speechcommands_data
-from .models import TinyMamba, TinyMamba3
+from .models import TinyMamba, TinyMamba3Multi, TinyMamba3
 from .onnx import export_onnx, test_onnx
 
 dataset_dir = "./data"
@@ -190,8 +190,8 @@ def main():
     elif dataset_type == "har":
         output_size = 6
         input_dim = 57
-        d_model = 24
-        d_state = 16
+        d_model = 16
+        d_state = 8
         d_conv = 4
         expand = 2
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
@@ -215,7 +215,7 @@ def main():
         case "mamba-1":
             model = TinyMamba(input_dim=input_dim,d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, output_size=output_size).to(device)
         case "mamba3":
-            model = TinyMamba3(input_dim=input_dim,hidden_dim=d_model,output_size=output_size).to(device)
+            model = TinyMamba3Multi(input_dim=input_dim,d_model=d_model, d_state=d_state, output_size=output_size).to(device)
         case _:
             sys.exit(
                 "Please specify a correct model with the environment variable MODEL"
