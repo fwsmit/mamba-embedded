@@ -1,6 +1,7 @@
 import os
 
 import optuna
+import optunahub
 from optuna.trial import TrialState
 import torch
 import torch.optim as optim
@@ -19,11 +20,7 @@ from .onnx import export_onnx
 
 DEVICE = torch.device("cuda")
 BATCHSIZE = 128
-# CLASSES = 10
-# DIR = os.getcwd()
 EPOCHS = 20
-N_TRAIN_EXAMPLES = BATCHSIZE * 30
-N_VALID_EXAMPLES = BATCHSIZE * 10
 dataset_dir = "./data"
 MODEL = "mamba3"
 MULTI_LAYER = False
@@ -169,21 +166,11 @@ def objective(trial):
     train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
     valid_loader = torch.utils.data.DataLoader(valid_ds, **validate_kwargs)
 
-    MAX_PARAMS = 3 * 2 * 64**2  # assume max hidden dim = 64
-    # size_ratio = MAX_PARAMS / model.approx_params()
-    # alpha = 0.25  # memory pressure parameter
-
     # Training of the model.
-    for epoch in range(EPOCHS):
+    for epoch in range(EPOCHS-1):
         train(model, DEVICE, train_loader, optimizer, epoch, print_stats=True)
-        accuracy = test(model, DEVICE, valid_loader)
 
-        # trial.report(accuracy, epoch)
-
-        # Handle pruning based on the intermediate value.
-        # if trial.should_prune():
-        #     raise optuna.exceptions.TrialPruned()
-
+    accuracy = test(model, DEVICE, valid_loader)
     onnx_path = "src/models/har-trial-model.onnx"
     export_onnx(model, "har", onnx_path, DEVICE)
 
@@ -199,7 +186,7 @@ if __name__ == "__main__":
         study_name=STUDY_NAME,
         storage=STORAGE_URL,
         directions=["maximize", "minimize"],
-        sampler=optuna.samplers.NSGAIISampler(),
+        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
         load_if_exists=True,
     )
     study.set_metric_names(["Accuracy", "Latency"])
