@@ -128,37 +128,6 @@ class TinyMambaMulti(nn.Module):
         return self.classifier(x)
 
 
-class TinyMamba3(nn.Module):
-    def __init__(self, input_dim=57, d_model=64, headdim=32, d_state=32, expand=2, output_size=6, is_mimo=False):
-        super().__init__()
-        self.linear_in = nn.Linear(input_dim, d_model)
-        self.mamba = Mamba3(
-            d_model=d_model,
-            d_state=d_state,
-            headdim=headdim,
-            expand=expand,
-            is_mimo=is_mimo,
-            dtype=torch.float32,
-        )
-        self.pool = nn.AdaptiveAvgPool1d(1)
-        self.classifier = nn.Linear(d_model, output_size)
-
-        import mamba_ssm.ops.triton.mamba3.mamba3_siso_combined as _combined_mod
-
-        _combined_mod.mamba3_siso_combined = mamba3_siso_combined_ref
-
-        import mamba_ssm.modules.mamba3 as _mamba3_mod
-
-        _mamba3_mod.mamba3_siso_combined = mamba3_siso_combined_ref
-
-    def forward(self, x):
-        x = self.linear_in(x)  # [B, T, H]
-        x = self.mamba(x)  # [B, T, H]
-        x = x.transpose(1, 2)  # [B, H, T]
-        x = self.pool(x).squeeze(-1)
-        return self.classifier(x)
-
-
 class TinyMamba3Multi(nn.Module):
     def __init__(self, input_dim=57, d_model=64, headdim=32, d_state=32, expand=2, output_size=6, is_mimo=False, n_layers=1):
         super().__init__()
@@ -178,7 +147,6 @@ class TinyMamba3Multi(nn.Module):
         )
         self.pool = nn.AdaptiveAvgPool1d(1)
         self.classifier = nn.Linear(d_model, output_size)
-
         import mamba_ssm.ops.triton.mamba3.mamba3_siso_combined as _combined_mod
 
         _combined_mod.mamba3_siso_combined = mamba3_siso_combined_ref
