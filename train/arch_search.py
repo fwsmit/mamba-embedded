@@ -166,19 +166,23 @@ def objective(trial):
     train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
     valid_loader = torch.utils.data.DataLoader(valid_ds, **validate_kwargs)
 
-    # Training of the model.
-    for epoch in range(EPOCHS-1):
-        train(model, DEVICE, train_loader, optimizer, epoch, print_stats=True)
-
-    accuracy = test(model, DEVICE, valid_loader)
+    # Train one epoch for more consistent latency
+    train(model, DEVICE, train_loader, optimizer, 0, print_stats=True)
     onnx_path = "src/models/har-trial-model.onnx"
     export_onnx(model, "har", onnx_path, DEVICE)
 
-    success, latency_ms = run_on_device()      # flash + parse
+    # Early test on device to check if it fits in memory
+    success, latency_ms = run_on_device()
     if not success:
         params_str = ", ".join(f"{k}={v}" for k, v in trial.params.items())
         print(f"Model didn't run successfully on the MCU ({params_str})")
         raise optuna.exceptions.TrialPruned()
+
+    # Training of the model.
+    for epoch in range(1, EPOCHS-2):
+        train(model, DEVICE, train_loader, optimizer, epoch, print_stats=True)
+
+    accuracy = test(model, DEVICE, valid_loader)
     return accuracy, latency_ms
 
 if __name__ == "__main__":
