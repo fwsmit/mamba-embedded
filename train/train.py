@@ -11,7 +11,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 import os
 from .data import load_har_data, load_mnist_data, load_speechcommands_data
-from .models import TinyMamba, TinyMamba3Multi, TinyMamba3
+from .models import TinyMamba,TinyMamba2Multi, TinyMamba3Multi
 from .onnx import export_onnx, test_onnx
 
 dataset_dir = "./data"
@@ -216,6 +216,8 @@ def main():
             model = TinyMamba(input_dim=input_dim,d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, output_size=output_size).to(device)
         case "mamba3":
             model = TinyMamba3Multi(input_dim=input_dim,d_model=d_model, d_state=d_state, output_size=output_size).to(device)
+        case "mamba-2":
+            model = TinyMamba2Multi(input_dim=input_dim,d_model=d_model, d_state=d_state, output_size=output_size).to(device)
         case _:
             sys.exit(
                 "Please specify a correct model with the environment variable MODEL"

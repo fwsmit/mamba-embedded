@@ -26,8 +26,13 @@ N_TRAIN_EXAMPLES = BATCHSIZE * 30
 N_VALID_EXAMPLES = BATCHSIZE * 10
 dataset_dir = "./data"
 MODEL = "mamba3"
+MULTI_LAYER = False
 
-STUDY_NAME = f"{MODEL}-har-multi-layer"
+if MULTI_LAYER:
+    STUDY_NAME = f"{MODEL}-har-multi-layer"
+else:
+    STUDY_NAME = f"{MODEL}-har"
+
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
 
@@ -101,7 +106,11 @@ def define_mamba1_model(trial):
     d_state = trial.suggest_int("d_state", 8, 16)
     d_conv = trial.suggest_int("d_conv", 2, 4)
     expand = trial.suggest_int("expand", 1, 4)
-    n_layers = trial.suggest_int("n_layers", 1, 10)
+    if MULTI_LAYER:
+        n_layers = trial.suggest_int("n_layers", 1, 10)
+    else:
+        n_layers = 1
+
     model = TinyMambaMulti(
         input_dim=57,
         d_model=d_model,
@@ -118,9 +127,14 @@ def define_mamba3_model(trial):
     d_model = trial.suggest_int("d_model", 8, 32, step=4)
     d_state = trial.suggest_int("d_state", 8, 16, step=2)
     expand = trial.suggest_int("expand", 1, 4)
-    n_layers = trial.suggest_int("n_layers", 1, 10)
+
+    if MULTI_LAYER:
+        n_layers = trial.suggest_int("n_layers", 1, 10)
+    else:
+        n_layers = 1
+
     d_inner = d_model * expand
-    nheads  = trial.suggest_categorical("nheads", [1, 2, 4, 8])
+    nheads = trial.suggest_categorical("nheads", [1, 2, 4, 8])
     if d_inner % (2 * nheads) != 0:
         raise optuna.exceptions.TrialPruned()
     headdim = d_inner // nheads
@@ -189,7 +203,7 @@ if __name__ == "__main__":
         load_if_exists=True,
     )
     study.set_metric_names(["Accuracy", "Latency"])
-    study.optimize(objective, n_trials=100, timeout=3600)
+    study.optimize(objective, n_trials=100)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])

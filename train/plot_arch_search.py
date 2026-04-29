@@ -5,6 +5,7 @@ Usage: python plot_hpo_comparison.py
 """
 
 import optuna
+from optuna.importance import PedAnovaImportanceEvaluator
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -27,7 +28,7 @@ def fig_path(name):
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_URL       = "sqlite:///mamba_hpo.db"
-STUDY_M1     = "mamba1-har-multi-layer"
+STUDY_M1     = "mamba1-har"
 STUDY_M3     = "mamba3-har"
 
 COLOR_M1     = "#4C9BE8"   # blue  – Mamba-1
