@@ -75,6 +75,11 @@ fn linker_be_nice() {
 }
 
 fn generate_model() {
+    // Inform cargo that the following features might be checked
+    println!("cargo::rustc-check-cfg=cfg(dataset_mnist)");
+    println!("cargo::rustc-check-cfg=cfg(dataset_har)");
+    println!("cargo::rustc-check-cfg=cfg(dataset_kws)");
+
     println!("cargo::rerun-if-env-changed=MODEL");
     println!("cargo::rerun-if-env-changed=DATASET");
     let model_type = env!("MODEL");
@@ -84,6 +89,7 @@ fn generate_model() {
     match dataset {
         "mnist" => println!("cargo:rustc-cfg=dataset_mnist"),
         "har" => println!("cargo:rustc-cfg=dataset_har"),
+        "kws" => println!("cargo:rustc-cfg=dataset_kws"),
         _ => println!("cargo:rustc-cfg=dataset_mnist"),
     }
 

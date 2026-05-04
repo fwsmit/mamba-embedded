@@ -17,7 +17,12 @@ use esp_hal::time::{Duration, Instant};
 use log::debug;
 use log::info;
 
-use mamba_embedded::data::test_tensor::input_tensor;
+#[cfg(dataset_har)]
+use mamba_embedded::data::test_tensor_har::input_tensor;
+
+#[cfg(dataset_kws)]
+use mamba_embedded::data::test_tensor_kws::input_tensor;
+
 use mamba_embedded::mymodel::Model;
 use mamba_embedded::utils::stack_paint::*;
 
@@ -43,8 +48,8 @@ fn main() -> ! {
     // Initialize allocator with a size
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
 
-    //esp_println::logger::init_logger_from_env();
-    esp_println::logger::init_logger(log::LevelFilter::Debug);
+    esp_println::logger::init_logger_from_env();
+    // esp_println::logger::init_logger(log::LevelFilter::Debug);
     info!("Started");
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -58,7 +63,6 @@ fn main() -> ! {
     let model: Model<Backend> = Model::default();
     info!("Running inference");
 
-    let dataset = env!("DATASET");
     let n_loops = 5;
     let mut peak_usage_paint = 0;
     let mut peak_usage_alloc = 0;

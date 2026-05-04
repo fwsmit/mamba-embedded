@@ -19,7 +19,7 @@ SAMPLE_INDEX = 0  # which validation sample to export
 OUT_SHAPE = (1, 10, 57)  # target Burn tensor shape  (N, T, F) → 10 * 57 = 570
 RAW_FEATURES = 561  # UCI-HAR raw feature width
 RANDOM_SEED  = 0         # fix seed so val_ds membership is deterministic
-OUT_FILE = Path("./src/data/test_tensor.rs")
+OUT_FILE = Path("./src/data/test_tensor_har.rs")
 
 # ── Load dataset ───────────────────────────────────────────────────────────────
 _, val_ds, _ = load_har_data(DATASET_DIR)

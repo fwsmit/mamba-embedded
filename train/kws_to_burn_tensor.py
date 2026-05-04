@@ -16,7 +16,7 @@ DATASET_DIR  = "./data"
 SAMPLE_INDEX = 0          # which validation sample to export
 OUT_SHAPE    = (1, 51, 40)  # target Burn tensor shape  (N, T, F)
 RANDOM_SEED  = 0          # fix seed so val_ds membership is deterministic
-OUT_FILE     = Path("./src/data/test_tensor.rs")
+OUT_FILE     = Path("./src/data/test_tensor_kws.rs")
 
 # ── Populate with your keyword class names in index order ──────────────────────
 KWS_CLASSES = CLASSES
