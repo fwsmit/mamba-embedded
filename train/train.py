@@ -181,6 +181,15 @@ def main():
         validate_kwargs.update(cuda_kwargs)
         validate_single_kwargs.update(cuda_kwargs)
 
+    # Improve DataLoader throughput when workers are used
+    if train_kwargs.get("num_workers", 0) > 0:
+        train_kwargs.setdefault("persistent_workers", True)
+        train_kwargs.setdefault("prefetch_factor", 2)
+    if validate_kwargs.get("num_workers", 0) > 0:
+        validate_kwargs.setdefault("persistent_workers", True)
+    if test_kwargs.get("num_workers", 0) > 0:
+        test_kwargs.setdefault("persistent_workers", True)
+
 
     if dataset_type == "mnist":
         output_size = 10
@@ -199,6 +208,9 @@ def main():
         output_size = 35
         input_dim = 40
         d_model = 4
+        d_state = 8
+        d_conv = 4
+        expand = 2
         train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist', 'kws' or 'har'")
@@ -232,7 +244,7 @@ def main():
 
     onnx_path = os.path.join(model_dir, model_name + dry_run_name + ".onnx")
     pt_path = os.path.join(model_dir, model_name + dry_run_name + ".pt")
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
 
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
     for epoch in range(1, args.epochs + 1):
