@@ -31,13 +31,13 @@ def train(model, device, train_loader, optimizer, epoch, print_stats=False, log_
         if print_stats and batch_idx % log_interval == 0:
             _now = time.perf_counter()
             print(
-                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tElapsed: {:.1f}ms".format(
+                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\tElapsed: {:.1f}ms / k item".format(
                     epoch,
                     batch_idx * len(data),
                     len(train_loader.dataset),
                     100.0 * batch_idx / len(train_loader),
                     loss.item(),
-                    (_now - _last_print) * 1000,
+                    (_now - _last_print) * 10**6 / (log_interval * len(data)),
                 )
             )
             _last_print = _now
@@ -177,10 +177,13 @@ def main():
     test_kwargs = {"batch_size": args.validate_batch_size}
     if use_cuda:
         if dataset_type == "kws":
-            num_workers = 8
+            num_workers = 1
         else:
             num_workers = 1
-        cuda_kwargs = {"num_workers": num_workers, "pin_memory": True}
+        cuda_kwargs = {
+            "num_workers": num_workers,
+            "pin_memory": True,
+        }
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
         validate_kwargs.update(cuda_kwargs)
@@ -213,9 +216,9 @@ def main():
         output_size = 35
         input_dim = 40
         d_model = 4
-        d_state = 8
+        d_state = 32
         d_conv = 4
-        expand = 2
+        expand = 4
         train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist', 'kws' or 'har'")
