@@ -11,19 +11,28 @@ import select
 import re
 import time
 import pty
+from multiprocessing import Pool, set_start_method
 
 from .models import TinyMambaMulti, TinyMamba3Multi
 from .data import load_har_data, load_mnist_data, load_speechcommands_data
 from .train import train, test
 from .onnx import export_onnx
 
+from filelock import FileLock
+_device_lock = FileLock("/tmp/mcu.lock")
+
 
 DEVICE = torch.device("cuda")
 BATCHSIZE = 128
 EPOCHS = 20
 dataset_dir = "./data"
-MODEL = "mamba3"
+MODEL = "mamba-1"
 MULTI_LAYER = False
+
+if MODEL == "mamba-1":
+    N_WORKERS = 1
+else:
+    N_WORKERS = 3
 
 if MULTI_LAYER:
     STUDY_NAME = f"{MODEL}-har-multi-layer"
@@ -43,59 +52,60 @@ def parse_device_result(output: str) -> tuple[bool, float | None]:
 
 
 def run_on_device(timeout: float = 120.0):
-    env = {
-        **os.environ,
-        "MODEL": "trial-model",
-        "DATASET": "har",
-    }
+    with _device_lock:
+        env = {
+            **os.environ,
+            "MODEL": "trial-model",
+            "DATASET": "har",
+        }
 
-    cmd = ["cargo", "run", "--release", "--quiet"]
+        cmd = ["cargo", "run", "--release", "--quiet"]
 
-    # Open new pty to not let process interfere with current PTY
-    master_fd, slave_fd = pty.openpty()
+        # Open new pty to not let process interfere with current PTY
+        master_fd, slave_fd = pty.openpty()
 
-    proc = subprocess.Popen(
-        cmd,
-        stdin=slave_fd,
-        stdout=slave_fd,
-        stderr=slave_fd,
-        env=env,
-        text=False,
-        close_fds=True,
-    )
+        proc = subprocess.Popen(
+            cmd,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            env=env,
+            text=False,
+            close_fds=True,
+        )
 
-    os.close(slave_fd)
+        os.close(slave_fd)
 
-    start_time = time.time()
-    buffer = b""
+        start_time = time.time()
+        buffer = b""
 
-    try:
-        while True:
-            if (time.time() - start_time) > timeout:
-                proc.terminate()
-                return False, None
-
-            rlist, _, _ = select.select([master_fd], [], [], 0.1)
-            if master_fd in rlist:
-                data = os.read(master_fd, 1024)
-                if not data:
-                    break
-
-                buffer += data
-
-                # Optional: real-time parsing trigger
-                if b"INFERENCE_OK" in buffer or b"panicked at" in buffer:
+        try:
+            while True:
+                if (time.time() - start_time) > timeout:
                     proc.terminate()
-                    break
+                    return False, None
 
-        proc.wait(timeout=5)
+                rlist, _, _ = select.select([master_fd], [], [], 0.1)
+                if master_fd in rlist:
+                    data = os.read(master_fd, 1024)
+                    if not data:
+                        break
 
-    finally:
-        os.close(master_fd)
+                    buffer += data
 
-    output = buffer.decode(errors="ignore")
+                    # Optional: real-time parsing trigger
+                    if b"INFERENCE_OK" in buffer or b"panicked at" in buffer:
+                        proc.terminate()
+                        break
 
-    return parse_device_result(output)
+            proc.wait(timeout=5)
+
+        finally:
+            os.close(master_fd)
+
+        output = buffer.decode(errors="ignore")
+
+        return parse_device_result(output)
 
 
 def define_mamba1_model(trial):
@@ -185,6 +195,16 @@ def objective(trial):
     accuracy = test(model, DEVICE, valid_loader)
     return accuracy, latency_ms
 
+
+def run_optimization(_):
+    study = optuna.load_study(
+        study_name=STUDY_NAME,
+        storage=STORAGE_URL,
+        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+    )
+    study.optimize(objective, n_trials=100 // N_WORKERS)
+
+
 if __name__ == "__main__":
     study = optuna.create_study(
         study_name=STUDY_NAME,
@@ -194,7 +214,14 @@ if __name__ == "__main__":
         load_if_exists=True,
     )
     study.set_metric_names(["Accuracy", "Latency"])
-    study.optimize(objective, n_trials=100)
+
+    if N_WORKERS > 1:
+        # Make multiprocessing work with cuda
+        set_start_method("spawn")
+        with Pool(processes=N_WORKERS) as pool:
+            pool.map(run_optimization, range(N_WORKERS))
+    else:
+        run_optimization(0)
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
