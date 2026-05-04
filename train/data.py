@@ -161,3 +161,27 @@ def load_speechcommands_data(data_dir, n_mfcc=40, cache_dir=None):
     val_ds   = SpeechCommandsWrapper("validation")
     test_ds  = SpeechCommandsWrapper("testing")
     return train_ds, val_ds, test_ds
+
+
+def get_data_input_size(dataset):
+    if dataset == "mnist":
+        input_dim = 28
+    elif dataset == "har":
+        input_dim = 57
+    elif dataset == "kws":
+        input_dim = 40
+    else:
+        raise ValueError("Unknown dataset type", dataset)
+    return input_dim
+
+
+def get_data_output_size(dataset):
+    if dataset == "mnist":
+        output_dim = 10
+    elif dataset == "har":
+        output_dim = 6
+    elif dataset == "kws":
+        output_dim = 35
+    else:
+        raise ValueError("Unknown dataset type", dataset)
+    return output_dim

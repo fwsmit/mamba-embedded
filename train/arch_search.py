@@ -14,7 +14,7 @@ import pty
 from multiprocessing import Pool, set_start_method
 
 from .models import TinyMambaMulti, TinyMamba3Multi
-from .data import load_har_data, load_mnist_data, load_speechcommands_data
+from .data import get_data_input_size, get_data_output_size, load_har_data, load_speechcommands_data
 from .train import train, test
 from .onnx import export_onnx
 
@@ -27,6 +27,7 @@ BATCHSIZE = 128
 EPOCHS = 20
 dataset_dir = "./data"
 MODEL = "mamba-1"
+DATASET = "har"
 MULTI_LAYER = False
 
 if MODEL == "mamba-1":
@@ -35,9 +36,9 @@ else:
     N_WORKERS = 3
 
 if MULTI_LAYER:
-    STUDY_NAME = f"{MODEL}-har-multi-layer"
+    STUDY_NAME = f"{MODEL}-{DATASET}-multi-layer"
 else:
-    STUDY_NAME = f"{MODEL}-har"
+    STUDY_NAME = f"{MODEL}-{DATASET}"
 
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
@@ -56,7 +57,7 @@ def run_on_device(timeout: float = 120.0):
         env = {
             **os.environ,
             "MODEL": "trial-model",
-            "DATASET": "har",
+            "DATASET": DATASET,
         }
 
         cmd = ["cargo", "run", "--release", "--quiet"]
@@ -119,13 +120,13 @@ def define_mamba1_model(trial):
         n_layers = 1
 
     model = TinyMambaMulti(
-        input_dim=57,
+        input_dim=get_data_input_size(DATASET),
         d_model=d_model,
         d_state=d_state,
         d_conv=d_conv,
         expand=expand,
         n_layers=n_layers,
-        output_size=6,
+        output_size=get_data_output_size(DATASET),
     )
     return model
 
@@ -146,30 +147,36 @@ def define_mamba3_model(trial):
         raise optuna.exceptions.TrialPruned()
     headdim = d_inner // nheads
     model = TinyMamba3Multi(
-        57,
+        get_data_input_size(DATASET),
         d_model=d_model,
         d_state=d_state,
         headdim=headdim,
         expand=expand,
         n_layers=n_layers,
-        output_size=6,
+        output_size=get_data_output_size(DATASET),
     )
     return model
 
 
 def objective(trial):
     # Generate the model.
-    if MODEL == "mamba1":
+    if MODEL == "mamba-1":
         model = define_mamba1_model(trial).to(DEVICE)
-    else:
+    elif MODEL == "mamba-3":
         model = define_mamba3_model(trial).to(DEVICE)
+    else:
+        raise ValueError("Unknown model type:", MODEL)
+
 
     # Generate the optimizers.
     optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
     lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
     optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
 
-    train_ds, valid_ds, _ = load_har_data(dataset_dir)
+    if DATASET == "har":
+        train_ds, valid_ds, _ = load_har_data(dataset_dir)
+    else:
+        train_ds, valid_ds, _ = load_speechcommands_data(dataset_dir)
 
     train_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True, "shuffle": True}
     validate_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True}
@@ -178,8 +185,8 @@ def objective(trial):
 
     # Train one epoch for more consistent latency
     train(model, DEVICE, train_loader, optimizer, 0, print_stats=True)
-    onnx_path = "src/models/har-trial-model.onnx"
-    export_onnx(model, "har", onnx_path, DEVICE)
+    onnx_path = f"src/models/{DATASET}-trial-model.onnx"
+    export_onnx(model, DATASET, onnx_path, DEVICE)
 
     # Early test on device to check if it fits in memory
     success, latency_ms = run_on_device()

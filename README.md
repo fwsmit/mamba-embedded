@@ -12,15 +12,16 @@ This project needs the following dependencies:
 ## Train the model
 
 ```shell
-python model/train.py
+python -m train.train
 ```
 
 This exports the model to onnx and places it in the src/model directory
 
-## Create test vector
+## Create test vectors
 
 ```shell
-python utils/mnist_to_burn_tensor.py
+python -m train.har_to_burn_tensor
+python -m train.kws_to_burn_tensor
 ```
 
 This exports the test
@@ -33,4 +34,5 @@ cargo run --release
 
 # Environment variables
 
-`MODEL`: Select which model to use. Choices from the following models: `mamba-1` `mamba-5`.
+`MODEL`: Select which model to use. Choices from the following models: `mamba-1` `mamba-3`.
+`DATASET`: Select which model to use. Choices from the following models: `kws` `har`.

@@ -10,7 +10,13 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 import os
-from .data import load_har_data, load_mnist_data, load_speechcommands_data
+from .data import (
+    load_har_data,
+    load_mnist_data,
+    load_speechcommands_data,
+    get_data_input_size,
+    get_data_output_size,
+)
 from .models import TinyMamba,TinyMamba2Multi, TinyMamba3Multi
 from .onnx import export_onnx, test_onnx
 import time
@@ -198,15 +204,14 @@ def main():
     if test_kwargs.get("num_workers", 0) > 0:
         test_kwargs.setdefault("persistent_workers", True)
 
-
+    input_dim = get_data_input_size(dataset_type)
+    output_size = get_data_output_size(dataset_type)
     if dataset_type == "mnist":
         output_size = 10
-        input_dim = 28
         d_model = 8
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
         output_size = 6
-        input_dim = 57
         d_model = 16
         d_state = 8
         d_conv = 4
@@ -214,11 +219,10 @@ def main():
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     elif dataset_type == "kws":
         output_size = 35
-        input_dim = 40
         d_model = 4
-        d_state = 32
-        d_conv = 4
-        expand = 4
+        d_state = 4
+        d_conv = 2
+        expand = 1
         train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist', 'kws' or 'har'")
@@ -234,7 +238,7 @@ def main():
     match model_type:
         case "mamba-1":
             model = TinyMamba(input_dim=input_dim,d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, output_size=output_size).to(device)
-        case "mamba3":
+        case "mamba-3":
             model = TinyMamba3Multi(input_dim=input_dim,d_model=d_model, d_state=d_state, output_size=output_size).to(device)
         case "mamba-2":
             model = TinyMamba2Multi(input_dim=input_dim,d_model=d_model, d_state=d_state, output_size=output_size).to(device)

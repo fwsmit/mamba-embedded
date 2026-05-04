@@ -5,6 +5,7 @@ import numpy as np
 import torch.nn.functional as F
 from .mamba_cpu_funcs import _selective_scan_vectorized
 from mamba_ssm.ops.triton.layernorm_gated import rms_norm_ref
+from .data import get_data_input_size
 
 
 def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
@@ -51,16 +52,17 @@ def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
 
 
 def export_onnx(model, dataset_type, onnx_path, device):
+    input_size = get_data_input_size(dataset_type)
     # dummy_input is already defined above based on dataset_type
     if dataset_type == "mnist":
         # For MNIST: (1, 784, 1) - flattened 28x28 image as sequence
         # dummy_input = torch.randn(1, 784, 1, device=device)
-        dummy_input = torch.randn(1, 1, 28, 28, device=device)
+        dummy_input = torch.randn(1, 1, input_size, input_size, device=device)
     if dataset_type == "kws":
-        dummy_input = torch.randn(1, 51, 40, device=device)
+        dummy_input = torch.randn(1, 51, input_size, device=device)
     else:
         # For HAR: (1, 561, 1) - 561 features as sequence
-        dummy_input = torch.randn(1, 10, 57, device=device)
+        dummy_input = torch.randn(1, 10, input_size, device=device)
 
     # Patch out some triton kernels with CPU implementations
     import mamba_ssm.modules.mamba_simple as _mamba_mod
