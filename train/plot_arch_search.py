@@ -28,8 +28,8 @@ def fig_path(name):
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_URL       = "sqlite:///mamba_hpo.db"
-STUDY_M1     = "mamba1-har"
-STUDY_M3     = "mamba3-har"
+STUDY_M1     = "mamba-1-har"
+STUDY_M3     = "mamba-3-har"
 
 COLOR_M1     = "#4C9BE8"   # blue  – Mamba-1
 COLOR_M3     = "#E8834C"   # orange – Mamba-3
