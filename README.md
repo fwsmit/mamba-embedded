@@ -12,7 +12,7 @@ This project needs the following dependencies:
 ## Train the model
 
 ```shell
-python -m train.train
+python -m train.main
 ```
 
 This exports the model to onnx and places it in the src/model directory
