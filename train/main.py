@@ -81,12 +81,6 @@ def main():
         metavar="N",
         help="how many batches to wait before logging training status",
     )
-    # parser.add_argument(
-    #     "--save-model",
-    #     action="store_true",
-    #     default=False,
-    #     help="For Saving the current Model",
-    # )
     parser.add_argument(
         "--export-onnx",
         action="store_true",
@@ -121,10 +115,7 @@ def main():
     validate_single_kwargs = {"batch_size": 1}
     test_kwargs = {"batch_size": args.validate_batch_size}
     if use_cuda:
-        if dataset_type == "kws":
-            num_workers = 1
-        else:
-            num_workers = 1
+        num_workers = 1
         cuda_kwargs = {
             "num_workers": num_workers,
             "pin_memory": True,
