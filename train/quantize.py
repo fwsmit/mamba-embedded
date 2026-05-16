@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         required=True,
-        choices=["mamba-1", "mamba-3"],
+        choices=["mamba-1", "mamba-1-fixed", "mamba-3"],
         help="Model architecture",
     )
 
