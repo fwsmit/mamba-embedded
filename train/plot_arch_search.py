@@ -137,9 +137,9 @@ legend_elements = [
 ]
 ax.legend(handles=legend_elements, framealpha=0.9, fontsize=9)
 
-ax.set_xlabel("Latency  (objective 2  — lower is better)", fontsize=11)
-ax.set_ylabel("Accuracy  (objective 1  — higher is better)", fontsize=11)
-ax.set_title("Pareto Front: Mamba-1 vs Mamba-3  (HAR)", fontsize=13, fontweight="bold")
+ax.set_xlabel("Latency  (rounded to whole ms, lower is better)", fontsize=11)
+ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
+ax.set_title("Hyperparameter optimization: Mamba-1 vs Mamba-3 (HAR)", fontsize=13, fontweight="bold")
 ax.grid(True, alpha=0.3, linestyle="--")
 fig1.tight_layout()
 fig1.savefig(fig_path("fig1_pareto_front.png"), dpi=FIG_DPI)
