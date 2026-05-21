@@ -3,11 +3,31 @@
 
 ## Install dependencies
 
-This project needs the following dependencies:
+### Conda environment
+
+All Python scripts in this project require a dedicated conda environment.
+Create and activate it with:
+
+```shell
+conda create -n torch-pascal python=3.12
+conda activate torch-pascal
+```
+
+Then install the required packages:
+
+```shell
+# Install PyTorch (see pytorch.org for CUDA/cpu variants)
+conda install pytorch torchvision torchaudio -c pytorch
+
+# Install mamba-ssm and causal-conv1d
+pip install mamba-ssm causal-conv1d
+```
+
+> **Note:** Remember to run `conda activate torch-pascal` before executing any Python scripts in this project.
+
+This project also needs the following additional dependencies:
 
 - espup (rust toolchain for ESP devices)
-- pytorch
-- mamba-ssm
 
 ## Train the model
 
@@ -25,9 +45,9 @@ python -m train.quantize --model $MODEL --dataset $DATASET
 
 Generates a quantized `.espdl` model from the ONNX export for use on ESP targets.
 
-## Run ESP-DL
+## Run on microcontroller
 
-Make sure to activate the ESP-IDF environment first:
+Make sure don activate the ESP-IDF environment first:
 
 ```shell
 source ~/.espressif/tools/activate_idf_v6.0.1.sh
@@ -37,27 +57,12 @@ Then build and flash the ESP-DL project onto an ESP32-S3 or ESP32-P4:
 
 ```shell
 cd esp-dl
-idf.py set-target <target>   # e.g. esp32s3 or esp32p4
+idf.py set-target esp32s3
 idf.py build
 idf.py flash monitor
 ```
 
 This compiles the ESP-DL inference example and flashes it to the device.
-
-## Run rust project (going away)
-
-```shell
-cargo run --release
-```
-
-Does the same as ESP-DL.
-
-### Create test vectors (for rust project)
-
-```shell
-python -m train.har_to_burn_tensor
-python -m train.kws_to_burn_tensor
-```
 
 ## Environment variables
 
