@@ -1,5 +1,7 @@
 import os
 
+import numpy as np
+import onnxruntime as ort
 import optuna
 import optunahub
 from optuna.trial import TrialState
@@ -26,8 +28,8 @@ DEVICE = torch.device("cuda")
 BATCHSIZE = 128
 EPOCHS = 20
 dataset_dir = "./data"
-MODEL = "mamba-1"
-DATASET = "har"
+MODEL = "mamba-3"
+DATASET = "kws"
 MULTI_LAYER = False
 
 if MODEL == "mamba-1":
@@ -42,6 +44,9 @@ else:
 
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
+_PC_WARMUP_RUNS = 10
+_PC_MEASURE_RUNS = 50
+
 
 def parse_device_result(output: str) -> tuple[bool, float | None]:
     if "panicked at" in output:
@@ -50,6 +55,72 @@ def parse_device_result(output: str) -> tuple[bool, float | None]:
         m = re.search(r"Latency (\d+)", output)
         return True, int(m.group(1)) if m else None
     raise ValueError("Unexpected output from device. Check that MCU is connected")
+
+
+def run_on_pc(onnx_path: str) -> tuple[bool, float | None]:
+    """
+    Estimate inference latency on the PC CPU using ONNX Runtime configured to
+    mimic single-core bare-metal execution as closely as possible.
+
+    Configuration rationale:
+      - intra/inter_op_num_threads=1  : single-threaded, like the ESP32-S3 LX7
+      - ORT_DISABLE_ALL optimizations : suppress SIMD fused kernels absent in burn-ndarray
+      - os.sched_setaffinity          : pin to core 0 to reduce scheduler noise
+      - batch_size=1                  : MCU always runs one sample at a time
+      - median over _PC_MEASURE_RUNS  : robust to cache-miss and preemption outliers
+      - shape from ONNX session       : avoids hardcoded shape mismatches
+
+    Returns (success, latency_us) to match the signature of run_on_device().
+    Latency is in microseconds so callers and Optuna objectives need no changes.
+
+    Note: with N_WORKERS > 1 all workers will pin to core 0. Either accept the
+    added noise, or pass the worker index through and pin each worker to a
+    distinct core.
+    """
+    # Pin this process to a single core (Linux only; no-op on other platforms)
+    try:
+        os.sched_setaffinity(0, {0})
+    except AttributeError:
+        pass  # Windows / macOS — best-effort
+
+    try:
+        sess_options = ort.SessionOptions()
+        sess_options.intra_op_num_threads = 1
+        sess_options.inter_op_num_threads = 1
+        # Disable all graph optimisations so ORT doesn't fuse ops into AVX kernels
+        # that burn-ndarray won't use on the MCU.
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
+
+        session = ort.InferenceSession(
+            onnx_path,
+            sess_options=sess_options,
+            providers=["CPUExecutionProvider"],
+        )
+
+        # Infer input shape directly from the model — always batch-size 1
+        model_input = session.get_inputs()[0]
+        shape = tuple(d if isinstance(d, int) and d > 0 else 1 for d in model_input.shape)
+        dummy_input = np.random.randn(*shape).astype(np.float32)
+        feed = {model_input.name: dummy_input}
+
+        # Warmup: prime the instruction cache and allocate any internal ORT buffers
+        for _ in range(_PC_WARMUP_RUNS):
+            session.run(None, feed)
+
+        # Measurement
+        latencies_us = []
+        for _ in range(_PC_MEASURE_RUNS):
+            t0 = time.perf_counter()
+            session.run(None, feed)
+            t1 = time.perf_counter()
+            latencies_us.append((t1 - t0) * 1_000_000)
+
+        median_us = float(np.median(latencies_us))
+        return True, median_us
+
+    except Exception as exc:
+        print(f"[run_on_pc] ONNX Runtime error: {exc}")
+        return False, None
 
 
 def run_on_device(timeout: float = 120.0):
@@ -170,7 +241,7 @@ def objective(trial):
 
     # Generate the optimizers.
     optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "AdamW"])
-    lr = trial.suggest_float("lr", 1e-4, 1e-2, log=True)
+    lr = trial.suggest_float("lr", 1e-3, 1e-1, log=True)
     optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
 
     if DATASET == "har":
@@ -183,24 +254,20 @@ def objective(trial):
     train_loader = torch.utils.data.DataLoader(train_ds, **train_kwargs)
     valid_loader = torch.utils.data.DataLoader(valid_ds, **validate_kwargs)
 
-    # Train one epoch for more consistent latency
-    train(model, DEVICE, train_loader, optimizer, 0, print_stats=True)
-    onnx_path = f"src/models/{DATASET}-trial-model.onnx"
-    export_onnx(model, DATASET, onnx_path, DEVICE)
-
-    # Early test on device to check if it fits in memory
-    success, latency_ms = run_on_device()
-    if not success:
-        params_str = ", ".join(f"{k}={v}" for k, v in trial.params.items())
-        print(f"Model didn't run successfully on the MCU ({params_str})")
-        raise optuna.exceptions.TrialPruned()
-
     # Training of the model.
-    for epoch in range(1, EPOCHS-2):
+    for epoch in range(1, EPOCHS-1):
         train(model, DEVICE, train_loader, optimizer, epoch, print_stats=True)
 
+    onnx_path = f"src/models/{DATASET}-{MODEL}-trial-{trial.number}.onnx"
+    export_onnx(model, DATASET, onnx_path, DEVICE)
+    success, latency_us = run_on_pc(onnx_path)
+    if not success:
+        params_str = ", ".join(f"{k}={v}" for k, v in trial.params.items())
+        print(f"[trial {trial.number}] PC latency estimation failed ({params_str})")
+        raise optuna.exceptions.TrialPruned()
+
     accuracy = test(model, DEVICE, valid_loader)
-    return accuracy, latency_ms
+    return accuracy, latency_us
 
 
 def run_optimization(_):
