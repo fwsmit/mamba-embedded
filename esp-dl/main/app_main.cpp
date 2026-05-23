@@ -114,4 +114,5 @@ extern "C" void app_main(void) {
   delete input;
 
   ESP_LOGI(TAG, "Finished");
+  ESP_LOGI(TAG, "INFERENCE_OK");
 }
