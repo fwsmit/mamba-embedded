@@ -1,60 +1,31 @@
 #!/usr/bin/env python3
-"""
-Offline Augmented Google Speech Commands v2 → MFCC Dataset Generator
-======================================================================
-
-Produces three serialised PyTorch-ready splits (train.pkl, val.pkl, test.pkl)
-with the following properties:
-
-  • Features : 40 MFCC coefficients extracted with a 40 ms frame / 20 ms hop
-                → 49 frames × 40 coeffs = 1 960 features per 1-second clip
-  • Train     : every sample duplicated N_AUG (20) times with random
-                  – time shift   : uniform ±100 ms
-                  – noise mixing : random 1-s clip from _background_noise_
-                                   scaled by uniform amplitude ∈ [0, NOISE_MAX_AMP]
-  • Val/Test  : no augmentation, MFCC extraction only
-  • Silence   : N_SILENCE_TRAIN clips synthesised from _background_noise_ for
-                  training; N_SILENCE_EVAL clips each for val and test
-
-Usage
------
-    python kws_dataset_gen.py  /path/to/speech_commands_v0.02  ./kws_data
-
-Loading the result
-------------------
-    from kws_dataset_gen import SpeechCommandsMFCC
-    train_ds = SpeechCommandsMFCC.load("kws_data/train.pkl")
-    loader   = DataLoader(train_ds, batch_size=64, shuffle=True, num_workers=4)
-    x, y = next(iter(loader))   # x: (64, 49, 40)  y: (64,)
-"""
-
 import argparse
 import pickle
 import random
 import sys
 from pathlib import Path
 from collections import defaultdict
+from torch.utils.data import Dataset
 
 import numpy as np
 import torch
 import torchaudio
 import torchaudio.transforms as T
-from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 # ── Audio / MFCC parameters ────────────────────────────────────────────────────
-SAMPLE_RATE     = 16_000          # Hz
-CLIP_SAMPLES    = 16_000          # 1 second exactly
+SAMPLE_RATE = 16_000  # Hz
+CLIP_SAMPLES = 16_000  # 1 second exactly
 
-N_MFCC          = 40
-N_MELS          = 40
-FRAME_LEN_MS    = 40              # 40 ms  → 640 samples @ 16 kHz
-HOP_LEN_MS      = 20              # 20 ms  → 320 samples @ 16 kHz
-F_MIN           = 20.0            # Hz
-F_MAX           = 4_000.0         # Hz
+N_MFCC = 40
+N_MELS = 40
+FRAME_LEN_MS = 40  # 40 ms  → 640 samples @ 16 kHz
+HOP_LEN_MS = 20  # 20 ms  → 320 samples @ 16 kHz
+F_MIN = 20.0  # Hz
+F_MAX = 4_000.0  # Hz
 
-FRAME_LEN   = int(SAMPLE_RATE * FRAME_LEN_MS / 1000)   # 640
-HOP_LEN     = int(SAMPLE_RATE * HOP_LEN_MS   / 1000)   # 320
+FRAME_LEN = int(SAMPLE_RATE * FRAME_LEN_MS / 1000)  # 640
+HOP_LEN = int(SAMPLE_RATE * HOP_LEN_MS / 1000)  # 320
 
 # With center=False: n_frames = ⌊(16000 − 640) / 320⌋ + 1 = 49
 N_FRAMES = (CLIP_SAMPLES - FRAME_LEN) // HOP_LEN + 1   # 49
@@ -63,18 +34,16 @@ assert N_FRAMES == 49, f"Unexpected frame count: {N_FRAMES}"
 assert N_FRAMES * N_MFCC == 1_960
 
 # ── Augmentation parameters ────────────────────────────────────────────────────
-N_AUG           = 20              # augmented copies per training sample
-MAX_SHIFT_MS    = 100             # ±100 ms  → ±1600 samples
-NOISE_MAX_AMP   = 0.1             # noise amplitude ceiling (uniform [0, MAX])
-MAX_SHIFT       = int(SAMPLE_RATE * MAX_SHIFT_MS / 1000)   # 1600
-
-# An amplification by about 20 times for the 10 keywords
 N_PER_CLASS = 60500
+MAX_SHIFT_MS = 100  # ±100 ms  → ±1600 samples
+NOISE_MAX_AMP = 0.1  # noise amplitude ceiling (uniform [0, MAX])
+MAX_SHIFT = int(SAMPLE_RATE * MAX_SHIFT_MS / 1000)  # 1600
+
 
 # ── Label space ────────────────────────────────────────────────────────────────
 
 KNOWN_WORDS: list[str] = sorted(
-    ["Yes", "No", "Up", "Down", "Left", "Right", "On", "Off", "Stop", "Go"]
+    ["yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"]
 )
 SILENCE_LABEL  = "silence"
 UNKNOWN_LABEL  = "unknown"
@@ -196,7 +165,7 @@ def mix_noise(
     return mixed
 
 
-def augment(wav: torch.Tensor, noise_pool: list[torch.Tensor]) -> torch.Tensor:
+def augment_wav(wav: torch.Tensor, noise_pool) -> torch.Tensor:
     """Apply time-shift then noise-mixing (order matches training-time pipeline)."""
     wav = random_time_shift(wav)
     wav = mix_noise(wav, noise_pool)
@@ -302,44 +271,79 @@ def convert_list_to_mfcc(
     """
     all_x: list[np.ndarray] = []
     all_y: list[int]        = []
-    n_skipped = 0
     all_unknown = defaultdict(list)
+
 
     for wav_path, label in tqdm(files, desc=desc, unit="file", leave=False):
         if label in KNOWN_WORDS:
             label_idx = LABEL2IDX[label]
-            try:
-                wav = load_waveform(wav_path)
-            except Exception as exc:
-                print(f"\n  [WARN] skipping {wav_path.name}: {exc}", file=sys.stderr)
-                n_skipped += 1
-                continue
-
-            wav = pad_or_trim(wav)
+            wav = load_waveform(wav_path)
 
             all_x.append(to_mfcc(wav, transform))
             all_y.append(label_idx)
         else:
             all_unknown[label].append(wav_path)
 
-    for _ in range(N_PER_CLASS):
+    for _ in range(len(all_x)//10):
         # Make sure every word is added evenly
-        label_idx = random.choice(list(all_unknown))
-        wav_path = random.choice(all_unknown[label_idx])
-        try:
-            wav = load_waveform(wav_path)
-        except Exception as exc:
-            print(f"\n  [WARN] skipping {wav_path.name}: {exc}", file=sys.stderr)
-            n_skipped += 1
-            continue
+        label = random.choice(list(all_unknown))
+        label_idx = LABEL2IDX[UNKNOWN_LABEL]
+        wav_path = random.choice(all_unknown[label])
+        wav = load_waveform(wav_path)
         all_x.append(to_mfcc(wav, transform))
         all_y.append(label_idx)
 
-    if n_skipped:
-        print(f"  [WARN] skipped {n_skipped} files due to load errors.", file=sys.stderr)
 
     X = np.stack(all_x, axis=0).astype(np.float32)
     y = np.array(all_y, dtype=np.int64)
+    return X, y
+
+
+def convert_list_to_mfcc_augmented(
+    files: list[tuple[Path, str]],
+    transform: T.MFCC,
+    n_per_class,
+    *,
+    desc: str = "",
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns
+    -------
+    X : float32 ndarray, shape (N, 49, 40)
+    y : int64   ndarray, shape (N,)
+    """
+    # all_x: list[np.ndarray] = []
+    # all_y: list[int] = []
+    all_unknown = defaultdict(list)
+    all_known = defaultdict(list)
+
+    for wav_path, label in files:
+        if label in KNOWN_WORDS:
+            all_known[label].append(wav_path)
+        else:
+            all_unknown[label].append(wav_path)
+
+    n_known = n_per_class * len(KNOWN_WORDS)
+    n_unknown = n_known // 10
+    N = n_known + n_unknown
+
+    X = np.empty((N, 49, 40), dtype=np.float32)
+    y = np.empty((N,), dtype=np.int64)
+    idx = 0
+
+    for _ in tqdm(range(n_known), desc=desc, unit="file", leave=False):
+        label = random.choice(list(all_known))
+        wav = load_waveform(random.choice(all_known[label]))
+        X[idx] = to_mfcc(wav, transform)
+        y[idx] = LABEL2IDX[label]
+        idx += 1
+
+    for _ in range(n_unknown):
+        label = random.choice(list(all_unknown))
+        wav = load_waveform(random.choice(all_unknown[label]))
+        X[idx] = to_mfcc(wav, transform)
+        y[idx] = LABEL2IDX[UNKNOWN_LABEL]
+        idx += 1
     return X, y
 
 
@@ -451,10 +455,6 @@ def main() -> None:
         help="Directory where train.pkl / val.pkl / test.pkl will be written",
     )
     parser.add_argument(
-        "--n-aug", type=int, default=N_AUG,
-        help="Number of augmented copies per training sample",
-    )
-    parser.add_argument(
         "--noise-amp", type=float, default=NOISE_MAX_AMP,
         help="Maximum noise amplitude coefficient (uniform [0, value])",
     )
@@ -480,7 +480,6 @@ def main() -> None:
     print(f"  Output dir    : {outdir}")
     print(f"  MFCC shape    : {N_FRAMES} frames × {N_MFCC} coeffs  "
           f"({FRAME_LEN_MS} ms / {HOP_LEN_MS} ms)")
-    print(f"  Augmentations : {args.n_aug}× per train sample")
     print(f"    time shift  : ±{MAX_SHIFT_MS} ms")
     print(f"    noise amp   : [0, {args.noise_amp}]")
     print(f"  Samples per class : {N_PER_CLASS}")
@@ -507,17 +506,19 @@ def main() -> None:
     transform = build_mfcc_transform()
 
     # ── Training split ────────────────────────────────────────────────────────
-    # print("[1/3] TRAIN")
-    # X_tr, y_tr = _process_split(
-    #     train_files, noise_pool, transform,
-    #     augment_data=True, n_aug=args.n_aug, desc="  train",
-    # )
-    # X_sil_tr, y_sil_tr = _make_silence_clips(noise_pool, transform, N_SILENCE_TRAIN)
-    # X_tr = np.concatenate([X_tr, X_sil_tr], axis=0)
-    # y_tr = np.concatenate([y_tr, y_sil_tr], axis=0)
-    # # Shuffle so silence isn't always at the end
-    # perm = np.random.permutation(len(y_tr))
-    # SpeechCommandsMFCC(X_tr[perm], y_tr[perm]).save(outdir / "train.pkl")
+    print("[1/3] TRAIN")
+    X_tr, y_tr = convert_list_to_mfcc_augmented(
+        train_files, transform, n_per_class=N_PER_CLASS,
+        desc="  train"
+    )
+    N_SILENCE_TRAIN = len(X_tr) // 11
+    X_sil_tr, y_sil_tr = _make_silence_clips(noise_pool, transform, N_SILENCE_TRAIN)
+    X_tr = np.concatenate([X_tr, X_sil_tr], axis=0)
+    y_tr = np.concatenate([y_tr, y_sil_tr], axis=0)
+    # Shuffle so silence isn't always at the end
+    perm = np.random.permutation(len(y_tr))
+    print(f"Generated training dataset with {len(X_tr)} samples")
+    SpeechCommandsMFCC(X_tr[perm], y_tr[perm]).save(outdir / "train.pkl")
 
     # ── Validation split ──────────────────────────────────────────────────────
     print(f"\n── [2/3] VAL  (no augmentation) ──────────────────────────────────")
@@ -525,10 +526,11 @@ def main() -> None:
         val_files, transform,
         desc="  val  "
     )
-    N_SILENCE_EVAL = len(X_va) / 11
+    N_SILENCE_EVAL = len(X_va) // 11
     X_sil_va, y_sil_va = _make_silence_clips(noise_pool, transform, N_SILENCE_EVAL)
     X_va = np.concatenate([X_va, X_sil_va], axis=0)
     y_va = np.concatenate([y_va, y_sil_va], axis=0)
+    print(f"Generated validation dataset with {len(X_va)} samples")
     SpeechCommandsMFCC(X_va, y_va).save(outdir / "val.pkl")
 
     # ── Test split ────────────────────────────────────────────────────────────
@@ -537,10 +539,11 @@ def main() -> None:
         test_files, transform,
         desc="  test ",
     )
-    N_SILENCE_TEST = len(X_te) / 11
+    N_SILENCE_TEST = len(X_te) // 11
     X_sil_te, y_sil_te = _make_silence_clips(noise_pool, transform, N_SILENCE_TEST)
     X_te = np.concatenate([X_te, X_sil_te], axis=0)
     y_te = np.concatenate([y_te, y_sil_te], axis=0)
+    print(f"Generated test dataset with {len(X_te)} samples")
     SpeechCommandsMFCC(X_te, y_te).save(outdir / "test.pkl")
 
     # ── Summary ───────────────────────────────────────────────────────────────
