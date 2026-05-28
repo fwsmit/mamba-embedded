@@ -5,9 +5,14 @@ from torchaudio.datasets import SPEECHCOMMANDS
 from torchaudio import transforms
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, random_split
+from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 import os
 import hashlib
+from pathlib import Path
+import numpy as np
+import pickle
+from .kws_dataset_gen import IDX2LABEL, N_FRAMES, N_MFCC, LABEL2IDX
 
 
 
@@ -47,129 +52,95 @@ def load_har_data(data_dir):
     test_ds = TensorDataset(X_test, y_test)
     return train_ds, val_ds, test_ds
 
-# The 35 classes in the full Speech Commands v2 dataset
-CLASSES = [
-    "backward", "bed", "bird", "cat", "dog", "down", "eight", "five", "follow",
-    "forward", "four", "go", "happy", "house", "learn", "left", "marvin", "nine",
-    "no", "off", "on", "one", "right", "seven", "sheila", "six", "stop", "three",
-    "tree", "two", "up", "visual", "wow", "yes", "zero",
-]
-LABEL_TO_IDX = {label: idx for idx, label in enumerate(CLASSES)}
 
-TARGET_SAMPLE_RATE = 16_000
-SAMPLE_LENGTH = 16_000  # 1 second at 16 kHz
-
-
-def _preprocessing_hash(n_mfcc, n_fft, hop_length, n_mels, sample_rate):
-    """Stable short hash of all preprocessing parameters — used as cache key."""
-    key = f"mfcc{n_mfcc}_fft{n_fft}_hop{hop_length}_mels{n_mels}_sr{sample_rate}"
-    return hashlib.md5(key.encode()).hexdigest()[:10]
-
-
-def load_speechcommands_data(data_dir, n_mfcc=40, cache_dir=None):
+class SpeechCommandsMFCC(Dataset):
     """
-    Load Speech Commands v2 with MFCC preprocessing following the Keyword Mamba
-    paper: each sample is returned as X ∈ ℝ^(T × F), a sequence of T time-frame
-    patches each carrying F = n_mfcc coefficients, ready for linear projection.
+    Lightweight wrapper around pre-computed MFCC arrays.
 
-    Preprocessed features are cached to disk on the first pass and reused on
-    subsequent runs. The cache is keyed by a hash of all preprocessing parameters,
-    so changing n_mfcc, hop_length, etc. automatically triggers a fresh cache.
+    Each ``__getitem__`` returns ``(mfcc, label)`` where
 
-    Args:
-        data_dir:   Root directory where the dataset is stored / downloaded.
-        n_mfcc:     Number of MFCC coefficients (= frequency dimension F).
-        cache_dir:  Root directory for the feature cache.  Defaults to
-                    <data_dir>/.mfcc_cache.
-    Returns:
-        train_ds, val_ds, test_ds — wrapped datasets ready for DataLoader.
+    * ``mfcc``  – ``FloatTensor`` of shape **(49, 40)**
+    * ``label`` – ``LongTensor`` scalar in *[0, NUM_CLASSES)*
+
+    Serialisation
+    -------------
+    >>> ds = SpeechCommandsMFCC(X, y)
+    >>> ds.save("kws_data/train.pkl")
+    >>> ds = SpeechCommandsMFCC.load("kws_data/train.pkl")
     """
-    N_FFT      = 400
-    HOP_LENGTH = 320
 
-    if cache_dir is None:
-        cache_dir = os.path.join(data_dir, ".mfcc_cache")
+    def __init__(self, X: np.ndarray, y: np.ndarray) -> None:
+        assert X.ndim == 3 and X.shape[1:] == (N_FRAMES, N_MFCC), \
+            f"X must be (N, {N_FRAMES}, {N_MFCC}), got {X.shape}"
+        self.X = torch.from_numpy(X)   # (N, 49, 40)  float32
+        self.y = torch.from_numpy(y)   # (N,)          int64
 
-    param_tag = _preprocessing_hash(n_mfcc, N_FFT, HOP_LENGTH, 80, TARGET_SAMPLE_RATE)
-    versioned_cache = os.path.join(cache_dir, param_tag)
+    # ── Dataset protocol ──────────────────────────────────────────────────────
 
-    mfcc_transform = torchaudio.transforms.MFCC(
-        sample_rate=TARGET_SAMPLE_RATE,
-        n_mfcc=n_mfcc,
-        melkwargs={
-            "n_fft":       N_FFT,
-            "hop_length":  HOP_LENGTH,
-            "n_mels":      80,
-        },
-    )
+    def __len__(self) -> int:
+        return len(self.y)
 
-    def preprocess(waveform, sample_rate):
-        if sample_rate != TARGET_SAMPLE_RATE:
-            waveform = torchaudio.transforms.Resample(
-                sample_rate, TARGET_SAMPLE_RATE
-            )(waveform)
-        length = waveform.shape[-1]
-        if length < SAMPLE_LENGTH:
-            waveform = torch.nn.functional.pad(waveform, (0, SAMPLE_LENGTH - length))
-        else:
-            waveform = waveform[..., :SAMPLE_LENGTH]
-        mfcc = mfcc_transform(waveform)
-        return mfcc.squeeze(0).transpose(0, 1)  # (T, F)
+    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.X[i], self.y[i]
 
-    class SpeechCommandsWrapper(torch.utils.data.Dataset):
-        def __init__(self, subset):
-            self._ds        = SPEECHCOMMANDS(data_dir, download=True, subset=subset)
-            self._cache_dir = os.path.join(versioned_cache, subset)
-            self._mem: dict[int, tuple] = {}
-            os.makedirs(self._cache_dir, exist_ok=True)
+    # ── I/O ───────────────────────────────────────────────────────────────────
 
-        def __len__(self):
-            return len(self._ds)
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as fh:
+            pickle.dump(
+                {"X": self.X.numpy(), "y": self.y.numpy(),
+                 "label2idx": LABEL2IDX, "idx2label": IDX2LABEL},
+                fh, protocol=pickle.HIGHEST_PROTOCOL,
+            )
+        size_mb = path.stat().st_size / 1_048_576
+        print(f"    ✓ {len(self):>7,} samples  →  {path}  ({size_mb:.1f} MB)")
 
-        def _cache_path(self, idx):
-            # _walker holds the full audio file path — use it as a stable,
-            # order-independent key rather than the integer index.
-            audio_path = self._ds._walker[idx]
-            rel = os.path.relpath(audio_path, data_dir)
-            # Flatten the relative path into a single filename.
-            safe_name = rel.replace(os.sep, "__")
-            return os.path.join(self._cache_dir, safe_name + ".pt")
+    @classmethod
+    def load(cls, path: str | Path) -> "SpeechCommandsMFCC":
+        with open(path, "rb") as fh:
+            data = pickle.load(fh)
+        res = cls(data["X"], data["y"])
+        print(res)
+        print(res.class_counts)
+        return res
 
-        def __getitem__(self, idx):
-            if idx in self._mem:
-                return self._mem[idx]
+    # ── Convenience ───────────────────────────────────────────────────────────
 
-            path = self._cache_path(idx)
-            if os.path.exists(path):
-                item =  torch.load(path, weights_only=True)
-            else:
-                waveform, sample_rate, label, *_ = self._ds[idx]
-                mfcc   = preprocess(waveform, sample_rate)   # (T, F)
-                target = LABEL_TO_IDX[label]
-                item = (mfcc, target)
+    @property
+    def class_counts(self) -> dict[str, int]:
+        """Return a {label: count} dictionary."""
+        counts: dict[str, int] = {}
+        for idx in self.y.tolist():
+            lbl = IDX2LABEL[idx]
+            counts[lbl] = counts.get(lbl, 0) + 1
+        return dict(sorted(counts.items()))
 
-                # Atomic write: write to a temp file then rename to avoid
-                # leaving partial .pt files if the process is interrupted.
-                tmp_path = path + ".tmp"
-                torch.save((mfcc, target), tmp_path)
-                os.replace(tmp_path, path)
+    def __repr__(self) -> str:
+        return (
+            f"SpeechCommandsMFCC("
+            f"n={len(self)}, shape={tuple(self.X.shape[1:])}, "
+            f"n_classes={self.y.unique().numel()})"
+        )
 
-            self._mem[idx] = item
-            return item
 
-    train_ds = SpeechCommandsWrapper("training")
-    val_ds   = SpeechCommandsWrapper("validation")
-    test_ds  = SpeechCommandsWrapper("testing")
+def load_speechcommands_data(data_dir):
+    dataset_dir = "speech_commands_v0.02_augmented"
+    dir = data_dir + "/" + dataset_dir
+    train_ds = SpeechCommandsMFCC.load(dir + "/train.pkl")
+    val_ds = SpeechCommandsMFCC.load(dir + "/val.pkl")
+    test_ds = SpeechCommandsMFCC.load(dir + "/test.pkl")
     return train_ds, val_ds, test_ds
 
 
 def get_data_input_size(dataset):
     if dataset == "mnist":
-        input_dim = 28
+        input_dim = [28, 28]
     elif dataset == "har":
-        input_dim = 57
+        input_dim = [10, 57]
     elif dataset == "kws":
-        input_dim = 40
+        input_dim = [49, 40]
     else:
         raise ValueError("Unknown dataset type", dataset)
     return input_dim

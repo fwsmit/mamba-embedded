@@ -106,12 +106,12 @@ def export_onnx(model, dataset_type, onnx_path, device):
     if dataset_type == "mnist":
         # For MNIST: (1, 784, 1) - flattened 28x28 image as sequence
         # dummy_input = torch.randn(1, 784, 1, device=device)
-        dummy_input = torch.randn(1, 1, input_size, input_size, device=device)
+        dummy_input = torch.randn(1, 1, input_size[0], input_size[1], device=device)
     if dataset_type == "kws":
-        dummy_input = torch.randn(1, 51, input_size, device=device)
+        dummy_input = torch.randn(1, input_size[0], input_size[1], device=device)
     else:
         # For HAR: (1, 561, 1) - 561 features as sequence
-        dummy_input = torch.randn(1, 10, input_size, device=device)
+        dummy_input = torch.randn(1, input_size[0], input_size[1], device=device)
 
     # Patch out some triton kernels with CPU implementations
     replace_unexportable_functions()

@@ -45,7 +45,7 @@ def main():
     parser.add_argument(
         "--lr",
         type=float,
-        default=0.02,
+        default=0.002,
         metavar="LR",
         help="learning rate (default: 0.02)",
     )
@@ -73,13 +73,6 @@ def main():
     )
     parser.add_argument(
         "--seed", type=int, default=1, metavar="S", help="random seed (default: 1)"
-    )
-    parser.add_argument(
-        "--log-interval",
-        type=int,
-        default=10,
-        metavar="N",
-        help="how many batches to wait before logging training status",
     )
     parser.add_argument(
         "--export-onnx",
@@ -115,7 +108,10 @@ def main():
     validate_single_kwargs = {"batch_size": 1}
     test_kwargs = {"batch_size": args.validate_batch_size}
     if use_cuda:
-        num_workers = 1
+        if dataset_type == "kws":
+            num_workers = 12
+        else:
+            num_workers = 1
         cuda_kwargs = {
             "num_workers": num_workers,
             "pin_memory": True,
@@ -134,24 +130,27 @@ def main():
     if test_kwargs.get("num_workers", 0) > 0:
         test_kwargs.setdefault("persistent_workers", True)
 
+    log_interval = 10
+
     input_dim = get_data_input_size(dataset_type)
     output_size = get_data_output_size(dataset_type)
     if dataset_type == "mnist":
-        output_size = 10
+        output_size = get_data_output_size(dataset_type)
         d_model = 8
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
-        output_size = 6
+        output_size = get_data_output_size(dataset_type)
         d_model = 16
         d_state = 8
         d_conv = 4
         expand = 2
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     elif dataset_type == "kws":
-        output_size = 35
-        d_model = 4
-        d_state = 4
-        d_conv = 2
+        log_interval = 40
+        output_size = get_data_output_size(dataset_type)
+        d_model = 16
+        d_state = 16
+        d_conv = 4
         expand = 1
         train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
     else:
@@ -167,11 +166,11 @@ def main():
 
     match model_type:
         case "mamba-1":
-            model = TinyMamba(input_dim=input_dim,d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, output_size=output_size).to(device)
+            model = TinyMamba(input_dim=input_dim[1],d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, output_size=output_size).to(device)
         case "mamba-3":
-            model = TinyMamba3Multi(input_dim=input_dim,d_model=d_model, d_state=d_state, output_size=output_size).to(device)
+            model = TinyMamba3Multi(input_dim=input_dim[1],d_model=d_model, d_state=d_state, output_size=output_size).to(device)
         case "mamba-2":
-            model = TinyMamba2Multi(input_dim=input_dim,d_model=d_model, d_state=d_state, output_size=output_size).to(device)
+            model = TinyMamba2Multi(input_dim=input_dim[1],d_model=d_model, d_state=d_state, output_size=output_size).to(device)
         case _:
             sys.exit(
                 "Please specify a correct model with the environment variable MODEL"
@@ -197,7 +196,7 @@ def main():
             optimizer,
             epoch,
             True,
-            log_interval=args.log_interval,
+            log_interval=log_interval,
             dry_run=args.dry_run,
         )
         test(model, device, validate_loader, print_stats=True)

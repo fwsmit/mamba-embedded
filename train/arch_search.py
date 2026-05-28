@@ -191,7 +191,7 @@ def define_mamba1_model(trial):
         n_layers = 1
 
     model = TinyMambaMulti(
-        input_dim=get_data_input_size(DATASET),
+        input_dim=get_data_input_size(DATASET)[1],
         d_model=d_model,
         d_state=d_state,
         d_conv=d_conv,
@@ -218,7 +218,7 @@ def define_mamba3_model(trial):
         raise optuna.exceptions.TrialPruned()
     headdim = d_inner // nheads
     model = TinyMamba3Multi(
-        get_data_input_size(DATASET),
+        get_data_input_size(DATASET)[1],
         d_model=d_model,
         d_state=d_state,
         headdim=headdim,

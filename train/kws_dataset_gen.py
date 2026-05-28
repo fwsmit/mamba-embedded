@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import pickle
 import random
 import sys
 from pathlib import Path
 from collections import defaultdict
-from torch.utils.data import Dataset
 
 import numpy as np
 import torch
@@ -361,79 +359,6 @@ def _make_silence_clips(
     X = np.stack(all_x, axis=0).astype(np.float32)
     y = np.full(n_clips, idx, dtype=np.int64)
     return X, y
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  PyTorch Dataset
-# ══════════════════════════════════════════════════════════════════════════════
-
-class SpeechCommandsMFCC(Dataset):
-    """
-    Lightweight wrapper around pre-computed MFCC arrays.
-
-    Each ``__getitem__`` returns ``(mfcc, label)`` where
-
-    * ``mfcc``  – ``FloatTensor`` of shape **(49, 40)**
-    * ``label`` – ``LongTensor`` scalar in *[0, NUM_CLASSES)*
-
-    Serialisation
-    -------------
-    >>> ds = SpeechCommandsMFCC(X, y)
-    >>> ds.save("kws_data/train.pkl")
-    >>> ds = SpeechCommandsMFCC.load("kws_data/train.pkl")
-    """
-
-    def __init__(self, X: np.ndarray, y: np.ndarray) -> None:
-        assert X.ndim == 3 and X.shape[1:] == (N_FRAMES, N_MFCC), \
-            f"X must be (N, {N_FRAMES}, {N_MFCC}), got {X.shape}"
-        self.X = torch.from_numpy(X)   # (N, 49, 40)  float32
-        self.y = torch.from_numpy(y)   # (N,)          int64
-
-    # ── Dataset protocol ──────────────────────────────────────────────────────
-
-    def __len__(self) -> int:
-        return len(self.y)
-
-    def __getitem__(self, i: int) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.X[i], self.y[i]
-
-    # ── I/O ───────────────────────────────────────────────────────────────────
-
-    def save(self, path: str | Path) -> None:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "wb") as fh:
-            pickle.dump(
-                {"X": self.X.numpy(), "y": self.y.numpy(),
-                 "label2idx": LABEL2IDX, "idx2label": IDX2LABEL},
-                fh, protocol=pickle.HIGHEST_PROTOCOL,
-            )
-        size_mb = path.stat().st_size / 1_048_576
-        print(f"    ✓ {len(self):>7,} samples  →  {path}  ({size_mb:.1f} MB)")
-
-    @classmethod
-    def load(cls, path: str | Path) -> "SpeechCommandsMFCC":
-        with open(path, "rb") as fh:
-            data = pickle.load(fh)
-        return cls(data["X"], data["y"])
-
-    # ── Convenience ───────────────────────────────────────────────────────────
-
-    @property
-    def class_counts(self) -> dict[str, int]:
-        """Return a {label: count} dictionary."""
-        counts: dict[str, int] = {}
-        for idx in self.y.tolist():
-            lbl = IDX2LABEL[idx]
-            counts[lbl] = counts.get(lbl, 0) + 1
-        return dict(sorted(counts.items()))
-
-    def __repr__(self) -> str:
-        return (
-            f"SpeechCommandsMFCC("
-            f"n={len(self)}, shape={tuple(self.X.shape[1:])}, "
-            f"n_classes={self.y.unique().numel()})"
-        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
