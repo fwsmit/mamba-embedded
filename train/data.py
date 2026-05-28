@@ -101,10 +101,7 @@ class SpeechCommandsMFCC(Dataset):
     def load(cls, path: str | Path) -> "SpeechCommandsMFCC":
         with open(path, "rb") as fh:
             data = pickle.load(fh)
-        res = cls(data["X"], data["y"])
-        print(res)
-        print(res.class_counts)
-        return res
+        return cls(data["X"], data["y"])
 
     # ── Convenience ───────────────────────────────────────────────────────────
 
@@ -152,7 +149,7 @@ def get_data_output_size(dataset):
     elif dataset == "har":
         output_dim = 6
     elif dataset == "kws":
-        output_dim = 35
+        output_dim = 12
     else:
         raise ValueError("Unknown dataset type", dataset)
     return output_dim

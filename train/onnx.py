@@ -6,6 +6,8 @@ import torch.nn.functional as F
 from mamba_ssm.ops.triton.layernorm_gated import rms_norm_ref
 import mamba_ssm.modules.mamba_simple as _mamba_mod
 import mamba_ssm.ops.triton.layernorm_gated as _ln_mod
+import matplotlib.pyplot as plt
+from pathlib import Path
 from .mamba_cpu_funcs import _selective_scan_vectorized
 from .data import get_data_input_size
 
@@ -51,6 +53,83 @@ def test_onnx(onnx_path, comp_model, test_loader, device, full_test):
         exit(1)
     else:
         print("ONNX validation succeeded (e <", atol, ")")
+
+
+def confusion_matrix_onnx(onnx_path, test_loader, idx2label, device=None):
+    ort_sess = ort.InferenceSession(onnx_path)
+
+    all_preds  = []
+    all_labels = []
+
+    for data, target in test_loader:
+        output = ort_sess.run(None, {"input": data.numpy()})
+        logits = output[0]                       # (1, num_classes)
+        preds  = np.argmax(logits, axis=1)       # (1,)
+
+        all_preds.append(preds)
+        all_labels.append(target.numpy())
+
+    all_preds  = np.concatenate(all_preds)
+    all_labels = np.concatenate(all_labels)
+
+    # ... rest unchanged
+
+    num_classes = logits.shape[1]
+    print(num_classes)
+    class_names = [idx2label[i] for i in range(num_classes)]
+
+    # --- Compute confusion matrix ---
+    cm = np.zeros((num_classes, num_classes), dtype=np.int64)
+    for true, pred in zip(all_labels, all_preds):
+        cm[true][pred] += 1
+
+    accuracy = np.trace(cm) / np.sum(cm)
+    print(f"Test accuracy (ONNX): {accuracy * 100:.2f}%")
+
+    # --- Per-class report ---
+    print(f"\n{'Class':<20} {'Precision':>10} {'Recall':>10} {'F1':>10} {'Support':>10}")
+    print("-" * 60)
+    for i, name in enumerate(class_names):
+        tp      = cm[i, i]
+        fp      = cm[:, i].sum() - tp
+        fn      = cm[i, :].sum() - tp
+        support = cm[i, :].sum()
+        prec    = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec     = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1      = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+        print(f"{name:<20} {prec:>10.3f} {rec:>10.3f} {f1:>10.3f} {support:>10}")
+
+    # --- Plot ---
+    fig, ax = plt.subplots(figsize=(max(6, num_classes), max(5, num_classes - 1)))
+
+    cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True).clip(min=1)
+    im = ax.imshow(cm_norm, interpolation="nearest", cmap=plt.cm.Blues, vmin=0, vmax=1)
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Normalised count")
+
+    ax.set(
+        xticks=np.arange(num_classes),
+        yticks=np.arange(num_classes),
+        xticklabels=class_names,
+        yticklabels=class_names,
+        xlabel="Predicted label",
+        ylabel="True label",
+        title=f"Confusion Matrix — {Path(onnx_path).stem}\nAccuracy: {accuracy*100:.2f}%",
+    )
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    thresh = 0.5
+    for i in range(num_classes):
+        for j in range(num_classes):
+            ax.text(
+                j, i,
+                f"{cm[i,j]}\n({cm_norm[i,j]:.2f})",
+                ha="center", va="center", fontsize=7,
+                color="white" if cm_norm[i, j] > thresh else "black",
+            )
+
+    fig.tight_layout()
+    plt.show()
+    return cm
 
 
 # Capture original functions to place back later
