@@ -3,6 +3,7 @@ import sys
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
+from mamba_ssm import Mamba, Mamba3
 import os
 from .data import (
     load_har_data,
@@ -11,7 +12,7 @@ from .data import (
     get_data_input_size,
     get_data_output_size,
 )
-from .models import TinyMamba, TinyMamba2Multi, TinyMamba3Multi
+from .models import MambaWrapper
 from .onnx import export_onnx, test_onnx
 from .train import train, test
 
@@ -133,13 +134,13 @@ def main():
     log_interval = 10
 
     input_dim = get_data_input_size(dataset_type)
-    output_size = get_data_output_size(dataset_type)
+    output_dim = get_data_output_size(dataset_type)
     if dataset_type == "mnist":
-        output_size = get_data_output_size(dataset_type)
+        output_dim = get_data_output_size(dataset_type)
         d_model = 8
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
-        output_size = get_data_output_size(dataset_type)
+        output_dim = get_data_output_size(dataset_type)
         d_model = 16
         d_state = 8
         d_conv = 4
@@ -147,7 +148,7 @@ def main():
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     elif dataset_type == "kws":
         log_interval = 40
-        output_size = get_data_output_size(dataset_type)
+        output_dim = get_data_output_size(dataset_type)
         d_model = 16
         d_state = 16
         d_conv = 4
@@ -166,11 +167,34 @@ def main():
 
     match model_type:
         case "mamba-1":
-            model = TinyMamba(input_dim=input_dim[1],d_model=d_model, d_state=d_state, d_conv=d_conv, expand=expand, output_size=output_size).to(device)
+            model = MambaWrapper(
+                mamba_model=Mamba,
+                n_layers=1,
+                input_dim=input_dim[1],
+                output_dim=output_dim,
+                d_model=d_model,
+                d_state=d_state,
+                d_conv=d_conv,
+                expand=expand,
+            ).to(device)
         case "mamba-3":
-            model = TinyMamba3Multi(input_dim=input_dim[1],d_model=d_model, d_state=d_state, output_size=output_size).to(device)
+            model = MambaWrapper(
+                mamba_model=Mamba2,
+                n_layers=1,
+                input_dim=input_dim[1],
+                output_dim=output_dim,
+                d_model=d_model,
+                d_state=d_state,
+            ).to(device)
         case "mamba-2":
-            model = TinyMamba2Multi(input_dim=input_dim[1],d_model=d_model, d_state=d_state, output_size=output_size).to(device)
+            model = MambaWrapper(
+                mamba_model=Mamba3,
+                n_layers=1,
+                input_dim=input_dim[1],
+                output_dim=output_dim,
+                d_model=d_model,
+                d_state=d_state,
+            ).to(device)
         case _:
             sys.exit(
                 "Please specify a correct model with the environment variable MODEL"

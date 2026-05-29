@@ -14,8 +14,9 @@ import re
 import time
 import pty
 from multiprocessing import Pool, set_start_method
+from mamba_ssm import Mamba, Mamba3
 
-from .models import TinyMambaMulti, TinyMamba3Multi
+from .models import MambaWrapper
 from .data import get_data_input_size, get_data_output_size, load_har_data, load_speechcommands_data
 from .train import train, test
 from .onnx import export_onnx
@@ -190,14 +191,16 @@ def define_mamba1_model(trial):
     else:
         n_layers = 1
 
-    model = TinyMambaMulti(
+    model = MambaWrapper(
+        mamba_model=Mamba,
+        n_layers=1,
         input_dim=get_data_input_size(DATASET)[1],
+        output_dim=get_data_output_size(DATASET),
         d_model=d_model,
         d_state=d_state,
         d_conv=d_conv,
         expand=expand,
         n_layers=n_layers,
-        output_size=get_data_output_size(DATASET),
     )
     return model
 
@@ -217,14 +220,16 @@ def define_mamba3_model(trial):
     if d_inner % (2 * nheads) != 0:
         raise optuna.exceptions.TrialPruned()
     headdim = d_inner // nheads
-    model = TinyMamba3Multi(
-        get_data_input_size(DATASET)[1],
+    model = MambaWrapper(
+        mamba_mode=Mamba3,
+        n_layers=1,
+        input_dim=get_data_input_size(DATASET)[1],
+        output_dim=get_data_output_size(DATASET),
         d_model=d_model,
         d_state=d_state,
         headdim=headdim,
         expand=expand,
         n_layers=n_layers,
-        output_size=get_data_output_size(DATASET),
     )
     return model
 

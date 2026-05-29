@@ -180,6 +180,7 @@ def put_back_unexportable_functions():
 
 
 def export_onnx(model, dataset_type, onnx_path, device):
+    model.eval()
     input_size = get_data_input_size(dataset_type)
     # dummy_input is already defined above based on dataset_type
     if dataset_type == "mnist":
