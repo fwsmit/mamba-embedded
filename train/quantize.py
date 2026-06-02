@@ -93,7 +93,7 @@ def build_calibration_dataset(dataset: str, root: Path):
 
     elif dataset == "kws":
         train_ds, _, _ = load_speechcommands_data(
-            data_dir=data_dir,
+            data_dir=str(data_dir),
         )
 
     else:
@@ -103,7 +103,6 @@ def build_calibration_dataset(dataset: str, root: Path):
 
 
 def infer_input_shape(dataset: str):
-
     if dataset == "har":
         # HAR ONNX input:
         # [batch, time, features]
@@ -112,7 +111,7 @@ def infer_input_shape(dataset: str):
     elif dataset == "kws":
         # KWS ONNX input:
         # [batch, time, mfcc]
-        return [1, 101, 40]
+        return [1, 49, 40]
 
     else:
         raise ValueError(f"Unknown dataset: {dataset}")
