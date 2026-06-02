@@ -19,7 +19,7 @@ from mamba_ssm import Mamba, Mamba3
 from .models import MambaWrapper
 from .data import get_data_input_size, get_data_output_size, load_har_data, load_speechcommands_data
 from .train import train, test
-from .onnx import export_onnx
+from .onnx_utils import export_onnx
 
 from filelock import FileLock
 _device_lock = FileLock("/tmp/mcu.lock")

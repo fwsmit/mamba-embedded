@@ -13,7 +13,7 @@ import numpy as np
 from .models import TinyMamba, TinyMamba3
 from .data import load_har_data
 from .train import train, test
-from .onnx import export_onnx
+from .onnx_utils import export_onnx
 
 
 DEVICE = torch.device("cuda")

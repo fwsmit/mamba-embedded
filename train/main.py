@@ -13,7 +13,7 @@ from .data import (
     get_data_output_size,
 )
 from .models import MambaWrapper
-from .onnx import export_onnx, test_onnx
+from .onnx_utils import export_onnx, test_onnx
 from .train import train, test
 
 dataset_dir = "./data"

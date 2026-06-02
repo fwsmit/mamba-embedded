@@ -1,6 +1,6 @@
 import os
 import torch
-from .onnx import confusion_matrix_onnx
+from .onnx_utils import confusion_matrix_onnx
 from .kws_dataset_gen import IDX2LABEL
 from .data import SpeechCommandsMFCC
 onnx_path = os.path.join("src", "models", "kws-mamba-1.onnx")
