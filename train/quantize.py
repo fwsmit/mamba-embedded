@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
 from torch.utils.data import DataLoader, TensorDataset
 from esp_ppq.api import espdl_quantize_onnx
 from torch.utils.data import Subset
@@ -241,44 +240,6 @@ def main():
         dispatching_override=None,
     )
 
-    # executor = TorchExecutor(
-    #     graph=quant_graph,
-    #     device="cpu",
-    # )
-
-    # ------------------------------------------------------------------
-    # Test inference
-    # ------------------------------------------------------------------
-
-    # # HAR example input
-    # x = torch.randn(1, 10, 57).float()
-    #
-    # # Forward pass
-    # outputs = executor.forward(x)
-    #
-    # print(type(outputs))
-    #
-    # # PPQ usually returns list/dict depending on graph
-    # if isinstance(outputs, list):
-    #     y = outputs[0]
-    # elif isinstance(outputs, dict):
-    #     y = list(outputs.values())[0]
-    # else:
-    #     y = outputs
-    #
-    # print("Output shape:", y.shape)
-    # print(y)
-    #
-    for op_str in quant_graph.operations:
-        op = quant_graph.operations[op_str]
-        if op.type == "Transpose" or op.type == "Conv":
-            print(op)
-            print("inputs", op.inputs)
-            print("outputs", op.outputs)
-            print("attributes", op.attributes)
-
-    # console = InteractiveConsole(locals())
-    # console.interact()
     # -----------------------------------------------------------------------
     # Outputs
     # -----------------------------------------------------------------------
