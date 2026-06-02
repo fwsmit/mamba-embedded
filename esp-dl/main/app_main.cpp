@@ -55,10 +55,9 @@ extern "C" void app_main(void) {
 
   ESP_LOGI(TAG, "Model loaded");
 
-  // ESP_ERROR_CHECK(model->test());
-  //
-  // ESP_LOGI(TAG, "Model tested");
-  //
+  ESP_ERROR_CHECK(model->test());
+
+  ESP_LOGI(TAG, "Model tested");
   // Run inference — single-tensor overload; outputs retrieved via get_outputs()
   //
   int64_t t_start = esp_timer_get_time();
@@ -86,7 +85,33 @@ extern "C" void app_main(void) {
   // Take the first (and only) output regardless of its name
   auto *output = output_map.begin()->second;
 
-  float *scores = (float *)output->data;
+  //
+  // Dequantize output: int8 quantized with exponent scale
+  // DL_SCALE(exponent) = (exponent > 0) ? (1 << exponent) : (1.0 / (1 << -exponent))
+  //
+  float scores[6];
+  int exponent = output->get_exponent();
+  float scale = (exponent > 0) ? (float)(1 << exponent) : (1.0f / (float)(1 << -exponent));
+
+  ESP_LOGI(TAG, "Output dtype: %s, exponent: %d, scale: %f",
+           output->get_dtype_string(), exponent, scale);
+
+  if (output->get_dtype() == dl::DATA_TYPE_INT8) {
+    int8_t *raw = (int8_t *)output->data;
+    for (int i = 0; i < 6; ++i) {
+      scores[i] = (float)raw[i] * scale;
+    }
+  } else if (output->get_dtype() == dl::DATA_TYPE_FLOAT) {
+    float *raw = (float *)output->data;
+    for (int i = 0; i < 6; ++i) {
+      scores[i] = raw[i];
+    }
+  } else {
+    ESP_LOGE(TAG, "Unsupported output dtype");
+    delete model;
+    delete input;
+    return;
+  }
 
   //
   // Find argmax
@@ -105,7 +130,7 @@ extern "C" void app_main(void) {
   ESP_LOGI(TAG, "Confidence: %f", max_score);
 
   //
-  // Optional: print all logits
+  // Print all logits
   //
   for (int i = 0; i < 6; ++i) {
     ESP_LOGI(TAG, "Class %d score: %f", i, scores[i]);
