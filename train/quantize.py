@@ -362,18 +362,7 @@ def main():
         dispatching_override=None,
     )
 
-    # After quantize_torch_model(), before export:
     fix_gather_output_shapes(quant_graph)
-    # dump_conv1d_neighbourhood(quant_graph)
-    # remove_spurious_conv1d_transposes(quant_graph)
-    #
-    # # Then export as normal
-    export_ppq_graph(
-        graph=quant_graph,
-        platform=TargetPlatform.ESPDL_INT8,
-        graph_save_to="har-mamba-1.espdl",
-        config_save_to="har-mamba-1.json",
-    )
 
     # executor = TorchExecutor(
     #     graph=quant_graph,
