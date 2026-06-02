@@ -16,7 +16,7 @@ from .models import MambaWrapper
 from .onnx_utils import export_onnx, test_onnx
 from .train import train, test
 
-dataset_dir = "./data"
+dataset_dir = os.path.expanduser("~/Datasets")
 
 
 def main():

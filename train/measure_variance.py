@@ -23,7 +23,7 @@ BATCHSIZE = 128
 EPOCHS = 20
 N_TRAIN_EXAMPLES = BATCHSIZE * 30
 N_VALID_EXAMPLES = BATCHSIZE * 10
-dataset_dir = "./data"
+dataset_dir = os.path.expanduser("~/Datasets")
 MODEL = "mamba1"
 
 STUDY_NAME = f"{MODEL}-har"

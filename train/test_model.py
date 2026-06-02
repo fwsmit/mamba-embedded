@@ -6,7 +6,7 @@ from .data import SpeechCommandsMFCC
 onnx_path = os.path.join("src", "models", "kws-mamba-1.onnx")
 # onnx_path = "/tmp/kws-mamba-1-dry.onnx"
 
-val_ds = SpeechCommandsMFCC.load("data/speech_commands_v0.02_augmented" + "/val.pkl")
+val_ds = SpeechCommandsMFCC.load(os.path.expanduser("~/Datasets/speech_commands_v0.02_augmented/val.pkl"))
 
 validate_single_kwargs = {"batch_size": 1}
 cuda_kwargs = {

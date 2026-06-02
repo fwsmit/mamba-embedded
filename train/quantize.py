@@ -86,7 +86,7 @@ def build_calibration_dataset(dataset: str, root: Path):
     Returns the training dataset used for PTQ calibration.
     """
 
-    data_dir = root / "data"
+    data_dir = Path.home() / "Datasets"
 
     if dataset == "har":
         train_ds, _, _ = load_har_data(data_dir)

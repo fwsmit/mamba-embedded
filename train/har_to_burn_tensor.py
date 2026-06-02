@@ -7,6 +7,7 @@ and writes a Rust source file containing:
   - pub fn expected_label() -> usize
 """
 
+import os
 import numpy as np
 import torch
 import textwrap
@@ -14,7 +15,7 @@ from pathlib import Path
 from .data import load_har_data
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-DATASET_DIR = "./data"
+DATASET_DIR = os.path.expanduser("~/Datasets")
 SAMPLE_INDEX = 0  # which validation sample to export
 OUT_SHAPE = (1, 10, 57)  # target Burn tensor shape  (N, T, F) → 10 * 57 = 570
 RAW_FEATURES = 561  # UCI-HAR raw feature width
