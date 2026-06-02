@@ -177,7 +177,7 @@ def main():
                 d_conv=d_conv,
                 expand=expand,
             ).to(device)
-        case "mamba-3":
+        case "mamba-2":
             model = MambaWrapper(
                 mamba_model=Mamba2,
                 n_layers=1,
@@ -186,14 +186,13 @@ def main():
                 d_model=d_model,
                 d_state=d_state,
             ).to(device)
-        case "mamba-2":
+        case "mamba-3":
             model = MambaWrapper(
                 mamba_model=Mamba3,
                 n_layers=1,
                 input_dim=input_dim[1],
                 output_dim=output_dim,
-                d_model=d_model,
-                d_state=d_state,
+                d_model=128,
             ).to(device)
         case _:
             sys.exit(

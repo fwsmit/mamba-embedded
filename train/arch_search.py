@@ -27,21 +27,20 @@ _device_lock = FileLock("/tmp/mcu.lock")
 
 DEVICE = torch.device("cuda")
 BATCHSIZE = 128
-EPOCHS = 20
+EPOCHS = 2
 dataset_dir = os.path.expanduser("~/Datasets")
-MODEL = "mamba-3"
+MODEL = "mamba-1"
 DATASET = "kws"
 MULTI_LAYER = False
+EXPERIMENT_NAME = "2"
+STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
+ONNX_DIR = f"src/models/{STUDY_NAME}"
 
 if MODEL == "mamba-1":
     N_WORKERS = 1
 else:
     N_WORKERS = 3
 
-if MULTI_LAYER:
-    STUDY_NAME = f"{MODEL}-{DATASET}-multi-layer"
-else:
-    STUDY_NAME = f"{MODEL}-{DATASET}"
 
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
@@ -193,7 +192,6 @@ def define_mamba1_model(trial):
 
     model = MambaWrapper(
         mamba_model=Mamba,
-        n_layers=1,
         input_dim=get_data_input_size(DATASET)[1],
         output_dim=get_data_output_size(DATASET),
         d_model=d_model,
@@ -221,8 +219,7 @@ def define_mamba3_model(trial):
         raise optuna.exceptions.TrialPruned()
     headdim = d_inner // nheads
     model = MambaWrapper(
-        mamba_mode=Mamba3,
-        n_layers=1,
+        mamba_model=Mamba3,
         input_dim=get_data_input_size(DATASET)[1],
         output_dim=get_data_output_size(DATASET),
         d_model=d_model,
@@ -260,10 +257,10 @@ def objective(trial):
     valid_loader = torch.utils.data.DataLoader(valid_ds, **validate_kwargs)
 
     # Training of the model.
-    for epoch in range(1, EPOCHS-1):
+    for epoch in range(1, EPOCHS+1):
         train(model, DEVICE, train_loader, optimizer, epoch, print_stats=True)
 
-    onnx_path = f"src/models/{DATASET}-{MODEL}-trial-{trial.number}.onnx"
+    onnx_path = f"{ONNX_DIR}/{DATASET}-{MODEL}-trial-{trial.number}.onnx"
     export_onnx(model, DATASET, onnx_path, DEVICE)
     success, latency_us = run_on_pc(onnx_path)
     if not success:
@@ -293,6 +290,7 @@ if __name__ == "__main__":
         load_if_exists=True,
     )
     study.set_metric_names(["Accuracy", "Latency"])
+    os.makedirs(ONNX_DIR, exist_ok=True)
 
     if N_WORKERS > 1:
         # Make multiprocessing work with cuda
