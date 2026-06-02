@@ -1,6 +1,7 @@
 #include "dl_model_base.hpp"
 // #include "dl_variable.hpp"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <cstring>
 #include <vector>
@@ -60,9 +61,13 @@ extern "C" void app_main(void) {
   //
   // Run inference — single-tensor overload; outputs retrieved via get_outputs()
   //
+  int64_t t_start = esp_timer_get_time();
   model->run(input);
+  int64_t t_end = esp_timer_get_time();
+  int64_t elapsed_us = t_end - t_start;
 
-  ESP_LOGI(TAG, "Inference completed");
+  ESP_LOGI(TAG, "Inference completed in %lld us (%.2f ms)", elapsed_us,
+           elapsed_us / 1000.0);
 
   //
   // Read output tensor
