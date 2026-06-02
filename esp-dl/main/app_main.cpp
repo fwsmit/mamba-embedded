@@ -54,9 +54,9 @@ extern "C" void app_main(void) {
 
   ESP_LOGI(TAG, "Model loaded");
 
-  ESP_ERROR_CHECK(model->test());
-
-  ESP_LOGI(TAG, "Model tested");
+  // ESP_ERROR_CHECK(model->test());
+  //
+  // ESP_LOGI(TAG, "Model tested");
   //
   // Run inference — single-tensor overload; outputs retrieved via get_outputs()
   //

@@ -1,6 +1,8 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  espressif/esp-dl: '>=3.2.0'
+  espressif/esp-dl:
+    path: esp-dl
+    git: https://github.com/espressif/esp-dl.git
   espressif/esp32_p4_function_ev_board_noglib:
     version: "*"
     rules:
