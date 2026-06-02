@@ -46,7 +46,7 @@ def main():
     parser.add_argument(
         "--lr",
         type=float,
-        default=0.002,
+        default=0.001,
         metavar="LR",
         help="learning rate (default: 0.02)",
     )
@@ -141,10 +141,10 @@ def main():
         train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
     elif dataset_type == "har":
         output_dim = get_data_output_size(dataset_type)
-        d_model = 16
-        d_state = 8
+        d_model = 30
+        d_state = 15
         d_conv = 4
-        expand = 2
+        expand = 1
         train_ds, val_ds, test_ds = load_har_data(dataset_dir)
     elif dataset_type == "kws":
         log_interval = 40
