@@ -299,7 +299,7 @@ def main():
 
     out_dir = repo_root / "esp-dl" / "main" / "model"
 
-    espdl_path = out_dir / f"{slug}.espdl"
+    espdl_path = out_dir / "model.espdl"
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -321,7 +321,7 @@ def main():
     print("=== ESP-PPQ quantisation ===")
     print(f"  Model      : {slug}")
     print(f"  ONNX       : {onnx_path}")
-    print(f"  Output     : {espdl_path}")
+    print(f"  Output slug: {slug}.espdl")
     print(f"  Target     : {TARGET} ({args.bits}-bit)")
     print(f"  Input shape: {input_shape} (batch excluded)")
     print(f"  Device     : {args.device}")

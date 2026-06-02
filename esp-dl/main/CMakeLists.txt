@@ -14,7 +14,7 @@ elseif("___idf_esp-dl" IN_LIST component_targets)
 endif()
 set(cmake_dir ${espdl_dir}/fbs_loader/cmake)
 include(${cmake_dir}/utilities.cmake)
-set(embed_files "model/har-mamba-1.espdl")
+set(embed_files "model/model.espdl")
 
 idf_component_register(SRC_DIRS ${src_dirs} INCLUDE_DIRS ${include_dirs} REQUIRES ${requires})
 

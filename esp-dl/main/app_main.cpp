@@ -16,9 +16,9 @@ const char *TAG = "mamba_har";
 // Embedded model binary symbols
 //
 extern const uint8_t
-    har_mamba_1_espdl_start[] asm("_binary_har_mamba_1_espdl_start");
+    model_espdl_start[] asm("_binary_model_espdl_start");
 extern const uint8_t
-    har_mamba_1_espdl_end[] asm("_binary_har_mamba_1_espdl_end");
+    model_espdl_end[] asm("_binary_model_espdl_end");
 
 extern "C" void app_main(void) {
   ESP_LOGI(TAG, "Starting HAR inference");
@@ -54,8 +54,8 @@ extern "C" void app_main(void) {
   // Load model from embedded binary
   //
   auto *model =
-      new dl::Model((const char *)har_mamba_1_espdl_start,
-                    (size_t)(har_mamba_1_espdl_end - har_mamba_1_espdl_start));
+      new dl::Model((const char *)model_espdl_start,
+                    (size_t)(model_espdl_end - model_espdl_start));
 
   ESP_LOGI(TAG, "Model loaded");
 
