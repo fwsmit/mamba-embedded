@@ -176,6 +176,7 @@ def main():
                 d_state=d_state,
                 d_conv=d_conv,
                 expand=expand,
+                bidirectional=True,
             ).to(device)
         case "mamba-2":
             model = MambaWrapper(
