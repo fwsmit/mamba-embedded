@@ -8,6 +8,7 @@ import optuna
 from optuna.importance import PedAnovaImportanceEvaluator
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import ticker
 import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
 import pandas as pd
@@ -28,8 +29,8 @@ def fig_path(name):
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DB_URL       = "sqlite:///mamba_hpo.db"
-STUDY_M1     = "mamba-1-har"
-STUDY_M3     = "mamba-3-har"
+STUDY_M1     = "mamba-1-kws"
+STUDY_M3     = "mamba-1-kws-2"
 
 COLOR_M1     = "#4C9BE8"   # blue  – Mamba-1
 COLOR_M3     = "#E8834C"   # orange – Mamba-3
@@ -124,6 +125,9 @@ ax.step(par_m1["latency"], par_m1["accuracy"],
 ax.step(par_m3["latency"], par_m3["accuracy"],
         color=PARETO_M3, linewidth=1.8, where="post", zorder=3)
 
+# ax.yaxis.set_major_locator(ticker.LinearLocator(11))
+ax.set_yticks(np.arange(0, 1.1, 0.1))
+
 # Legend with all-trials proxy
 legend_elements = [
     Line2D([0], [0], marker=MARKER_PAR, color="w", markerfacecolor=PARETO_M1,
@@ -137,9 +141,9 @@ legend_elements = [
 ]
 ax.legend(handles=legend_elements, framealpha=0.9, fontsize=9)
 
-ax.set_xlabel("Latency  (rounded to whole ms, lower is better)", fontsize=11)
+ax.set_xlabel("Latency on pc (us, lower is better)", fontsize=11)
 ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
-ax.set_title("Hyperparameter optimization: Mamba-1 vs Mamba-3 (HAR)", fontsize=13, fontweight="bold")
+ax.set_title("Hyperparameter optimization: Mamba-1 vs Mamba-1 (improved dataset (KWS)", fontsize=13, fontweight="bold")
 ax.grid(True, alpha=0.3, linestyle="--")
 fig1.tight_layout()
 fig1.savefig(fig_path("fig1_pareto_front.png"), dpi=FIG_DPI)
