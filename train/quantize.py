@@ -3,6 +3,8 @@ from esp_ppq.IR import BaseGraph, Operation
 # from esp_ppq.passes import QuantizationOptimizationPass
 from esp_ppq.core import TargetPlatform
 import argparse
+import re
+import struct
 import sys
 from pathlib import Path
 
@@ -38,17 +40,10 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--dataset",
+        "--onnx-path",
+        type=Path,
         required=True,
-        choices=["har", "kws"],
-        help="Dataset the model was trained on",
-    )
-
-    parser.add_argument(
-        "--model",
-        required=True,
-        choices=["mamba-1", "mamba-1-sim", "mamba-3"],
-        help="Model architecture",
+        help="Path to the ONNX model file",
     )
 
     parser.add_argument(
@@ -104,19 +99,59 @@ def load_datasets(dataset: str):
         raise ValueError(f"Unsupported dataset: {dataset}")
 
 
-def infer_input_shape(dataset: str):
-    if dataset == "har":
-        # HAR ONNX input:
-        # [batch, time, features]
-        return [1, 10, 57]
+INPUT_SHAPE_MAP = {
+    (1, 10, 57): "har",
+    (1, 49, 40): "kws",
+}
 
-    elif dataset == "kws":
-        # KWS ONNX input:
-        # [batch, time, mfcc]
-        return [1, 49, 40]
 
-    else:
-        raise ValueError(f"Unknown dataset: {dataset}")
+def infer_dataset_from_onnx(onnx_path: Path) -> str:
+    """
+    Load an ONNX model and infer the dataset from its input shape.
+
+    Returns the dataset name (e.g. 'har', 'kws').
+    """
+    model = onnx.load(str(onnx_path))
+    graph = model.graph
+
+    if not graph.input:
+        raise ValueError(f"ONNX model has no inputs: {onnx_path}")
+
+    inp = graph.input[0]
+    shape = tuple(d.dim_value for d in inp.type.tensor_type.shape.dim)
+
+    if shape not in INPUT_SHAPE_MAP:
+        raise ValueError(
+            f"Unknown input shape {shape} in {onnx_path}. "
+            f"Known shapes: {list(INPUT_SHAPE_MAP.keys())}"
+        )
+
+    return INPUT_SHAPE_MAP[shape]
+
+
+def infer_model_name(onnx_path: Path) -> str:
+    """
+    Infer the model architecture name from the ONNX filename.
+
+    Expects filenames like '<dataset>-<model>.onnx', e.g. 'har-mamba-1.onnx'.
+    Strips the dataset prefix and .onnx suffix to return e.g. 'mamba-1'.
+    """
+    stem = onnx_path.stem  # e.g. 'har-mamba-1'
+    # Remove known dataset prefixes
+    for prefix in INPUT_SHAPE_MAP.values():
+        if stem.startswith(prefix + "-"):
+            return stem[len(prefix) + 1:]
+    # Fallback: return the whole stem
+    return stem
+
+
+def infer_input_shape(onnx_path: Path):
+    """
+    Load an ONNX model and return its input shape as a list.
+    """
+    model = onnx.load(str(onnx_path))
+    inp = model.graph.input[0]
+    return [d.dim_value for d in inp.type.tensor_type.shape.dim]
 
 
 # ---------------------------------------------------------------------------
@@ -320,9 +355,21 @@ def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
     """
     Report model file sizes, split by parameters and graph overhead.
 
-    Parameter size is computed from the ONNX initializers (raw element count
-    times element data-type size). Graph overhead is the remainder of the file
-    size (protobuf encoding of graph structure, node definitions, etc.).
+    For the ONNX model, parameter size is computed from the initializers (raw
+    element count times element data-type size). Graph overhead is the remainder
+    of the file size (protobuf encoding of graph structure, node definitions,
+    etc.).
+
+    For the ESP-DL model (.espdl), the EDL2 format is:
+      char[4]  magic ("EDL2")
+      uint32   mode (0 = no encryption)
+      uint32   flatbuffer data size
+      uint32   zero padding
+      uint8[]  flatbuffer data
+
+    Parameter size is computed from the .info file by summing all initializer
+    element counts times their data-type sizes. Graph overhead is the flatbuffer
+    data size minus the parameter size.
     """
     print()
     print("  ┌─ Model sizes ──────────────────────────────────┐")
@@ -347,12 +394,72 @@ def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
     print(f"  │    Parameters : {param_size / 1024:>8.1f} KB              │")
     print(f"  │    Graph      : {graph_overhead / 1024:>8.1f} KB              │")
 
-    # --- Quantized ESPDL outputs ---
-    for suffix in (".espdl", ".info", ".json"):
-        p = espdl_path.with_suffix(suffix)
-        if p.exists():
-            size_kb = p.stat().st_size / 1024
-            print(f"  │  {suffix:>5} file    : {size_kb:>8.1f} KB              │")
+    # --- Quantized ESP-DL model ---
+    espdl_file = espdl_path.with_suffix(".espdl")
+    info_file = espdl_path.with_suffix(".info")
+
+    if espdl_file.exists():
+        with open(espdl_file, "rb") as f:
+            raw = f.read()
+
+        total = len(raw)
+        magic = raw[:4]
+        flatbuf_size = struct.unpack("<I", raw[8:12])[0]
+        header_overhead = 16  # 4 magic + 4 mode + 4 size + 4 padding
+        trailing_pad = total - header_overhead - flatbuf_size
+
+        # Parse .info for initializer sizes
+        espdl_param_size = 0
+        if info_file.exists():
+            info_text = info_file.read_text()
+            init_start = info_text.find("initializers (")
+            if init_start != -1:
+                init_end = info_text.find(")", init_start)
+                init_section = info_text[init_start:init_end]
+
+                dtype_size = {
+                    "INT8": 1, "UINT8": 1,
+                    "INT16": 2, "UINT16": 2,
+                    "INT32": 4, "UINT32": 4,
+                    "INT64": 8, "UINT64": 8,
+                    "FLOAT": 4, "FLOAT16": 2, "BFLOAT16": 2,
+                    "DOUBLE": 8,
+                    "BOOL": 1,
+                }
+
+                for line in init_section.split("\n"):
+                    line = line.strip()
+                    if not line or line == "initializers (":
+                        continue
+                    if line.startswith("%"):
+                        line = line[1:]
+                    bracket = line.find("[")
+                    if bracket == -1:
+                        continue
+                    rest = line[bracket + 1:-1]
+                    parts = rest.split(", ", 1)
+                    if len(parts) != 2:
+                        continue
+                    dtype = parts[0]
+                    shape_str = parts[1]
+                    if shape_str == "scalar":
+                        num_elements = 1
+                    else:
+                        dims = [int(d) for d in shape_str.split("x")]
+                        num_elements = 1
+                        for d in dims:
+                            num_elements *= d
+                    espdl_param_size += num_elements * dtype_size.get(dtype, 1)
+
+        espdl_graph_overhead = flatbuf_size - espdl_param_size
+
+        print(f"  │  ESP-DL model (model.espdl)                    │")
+        print(f"  │    Total      : {total / 1024:>8.1f} KB              │")
+        print(f"  │    Header     : {header_overhead / 1024:>8.1f} KB              │")
+        print(f"  │    Parameters : {espdl_param_size / 1024:>8.1f} KB              │")
+        print(f"  │    Graph      : {espdl_graph_overhead / 1024:>8.1f} KB              │")
+        if trailing_pad > 0:
+            print(f"  │    Padding    : {trailing_pad / 1024:>8.1f} KB              │")
 
     print("  └──────────────────────────────────────────────────┘")
     print()
@@ -370,15 +477,7 @@ def main():
     # Repository root
     repo_root = Path(__file__).resolve().parent.parent
 
-    slug = f"{args.dataset}-{args.model}"
-
-    onnx_path = repo_root / "src" / "models" / f"{slug}.onnx"
-
-    out_dir = repo_root / "esp-dl" / "main" / "model"
-
-    espdl_path = out_dir / "model.espdl"
-
-    out_dir.mkdir(parents=True, exist_ok=True)
+    onnx_path = args.onnx_path.resolve()
 
     # -----------------------------------------------------------------------
     # Sanity checks
@@ -391,16 +490,29 @@ def main():
         )
         sys.exit(1)
 
-    input_shape = infer_input_shape(args.dataset)
+    # Infer dataset and model name from the ONNX file
+    dataset = infer_dataset_from_onnx(onnx_path)
+    model_name = infer_model_name(onnx_path)
+
+    slug = f"{dataset}-{model_name}"
+
+    input_shape = infer_input_shape(onnx_path)
+
+    out_dir = repo_root / "esp-dl" / "main" / "model"
+
+    espdl_path = out_dir / "model.espdl"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     n_calib_samples = args.calib_steps * CALIB_BATCH
 
     print("=== ESP-PPQ quantisation ===")
     print(f"  Model      : {slug}")
+    print(f"  Dataset    : {dataset}")
     print(f"  ONNX       : {onnx_path}")
     print(f"  Output slug: model.espdl")
     print(f"  Target     : {TARGET} ({args.bits}-bit)")
-    print(f"  Input shape: {input_shape} (batch excluded)")
+    print(f"  Input shape: {input_shape}")
     print(f"  Device     : {args.device}")
 
     # -----------------------------------------------------------------------
@@ -410,7 +522,7 @@ def main():
     print("\n[1/4] Building calibration dataloader ...")
 
     calib_loader = load_calibration(
-        args.dataset,
+        dataset,
         repo_root,
         n_calib_samples,
     )
@@ -445,7 +557,7 @@ def main():
     if not args.skip_loss_report:
         print("\n[3/4] Evaluating quantization loss on validation set ...")
 
-        _, val_ds, _ = load_datasets(args.dataset)
+        _, val_ds, _ = load_datasets(dataset)
 
         evaluate_quantization_loss(
             quant_graph=quant_graph,
