@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import onnx
 import onnxruntime as ort
 from torch.utils.data import DataLoader, TensorDataset
 from esp_ppq.api import espdl_quantize_onnx
@@ -69,6 +70,12 @@ def parse_args():
         "--device",
         default="cpu",
         help="Device for PPQ calibration: 'cpu' or 'cuda' (default: cpu)",
+    )
+
+    parser.add_argument(
+        "--skip-loss-report",
+        action="store_true",
+        help="Skip loading the dataset and reporting quantization loss / model sizes",
     )
 
     return parser.parse_args()
@@ -286,6 +293,72 @@ def evaluate_quantization_loss(
 
 
 # ---------------------------------------------------------------------------
+# Model size reporting
+# ---------------------------------------------------------------------------
+
+
+def _get_elem_size(data_type: int) -> int:
+    """Return element size in bytes for an ONNX tensor data type."""
+    type_size = {
+        onnx.TensorProto.FLOAT: 4,
+        onnx.TensorProto.FLOAT16: 2,
+        onnx.TensorProto.DOUBLE: 8,
+        onnx.TensorProto.INT64: 8,
+        onnx.TensorProto.INT32: 4,
+        onnx.TensorProto.INT16: 2,
+        onnx.TensorProto.INT8: 1,
+        onnx.TensorProto.UINT64: 8,
+        onnx.TensorProto.UINT32: 4,
+        onnx.TensorProto.UINT16: 2,
+        onnx.TensorProto.UINT8: 1,
+        onnx.TensorProto.BOOL: 1,
+    }
+    return type_size.get(data_type, 4)
+
+
+def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
+    """
+    Report model file sizes, split by parameters and graph overhead.
+
+    Parameter size is computed from the ONNX initializers (raw element count
+    times element data-type size). Graph overhead is the remainder of the file
+    size (protobuf encoding of graph structure, node definitions, etc.).
+    """
+    print()
+    print("  ┌─ Model sizes ──────────────────────────────────┐")
+
+    # --- Original ONNX model ---
+    onnx_size = onnx_path.stat().st_size
+
+    model = onnx.load(str(onnx_path))
+
+    param_size = 0
+    for init in model.graph.initializer:
+        num_elements = 1
+        for d in init.dims:
+            num_elements *= d
+        param_size += num_elements * _get_elem_size(init.data_type)
+
+    graph_overhead = onnx_size - param_size
+
+    rel = onnx_path.relative_to(repo_root)
+    print(f"  │  ONNX model ({rel})        │")
+    print(f"  │    Total      : {onnx_size / 1024:>8.1f} KB              │")
+    print(f"  │    Parameters : {param_size / 1024:>8.1f} KB              │")
+    print(f"  │    Graph      : {graph_overhead / 1024:>8.1f} KB              │")
+
+    # --- Quantized ESPDL outputs ---
+    for suffix in (".espdl", ".info", ".json"):
+        p = espdl_path.with_suffix(suffix)
+        if p.exists():
+            size_kb = p.stat().st_size / 1024
+            print(f"  │  {suffix:>5} file    : {size_kb:>8.1f} KB              │")
+
+    print("  └──────────────────────────────────────────────────┘")
+    print()
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -334,7 +407,7 @@ def main():
     # Calibration data
     # -----------------------------------------------------------------------
 
-    print("\n[1/3] Building calibration dataloader ...")
+    print("\n[1/4] Building calibration dataloader ...")
 
     calib_loader = load_calibration(
         args.dataset,
@@ -346,7 +419,7 @@ def main():
     # Quantisation
     # -----------------------------------------------------------------------
 
-    print("\n[2/3] Running PTQ ...")
+    print("\n[2/4] Running PTQ ...")
 
     quant_graph = espdl_quantize_onnx(
         onnx_import_file=str(onnx_path),
@@ -361,7 +434,7 @@ def main():
         export_test_values=True,
         error_report=True,
         skip_export=False,
-        verbose=1,
+        verbose=0,
         dispatching_override=None,
     )
 
@@ -369,16 +442,19 @@ def main():
     # Quantization loss evaluation on full validation set
     # -----------------------------------------------------------------------
 
-    print("\n[3/4] Evaluating quantization loss on validation set ...")
+    if not args.skip_loss_report:
+        print("\n[3/4] Evaluating quantization loss on validation set ...")
 
-    _, val_ds, _ = load_datasets(args.dataset)
+        _, val_ds, _ = load_datasets(args.dataset)
 
-    evaluate_quantization_loss(
-        quant_graph=quant_graph,
-        onnx_path=str(onnx_path),
-        val_ds=val_ds,
-        device=args.device,
-    )
+        evaluate_quantization_loss(
+            quant_graph=quant_graph,
+            onnx_path=str(onnx_path),
+            val_ds=val_ds,
+            device=args.device,
+        )
+    else:
+        print("\n[3/4] Skipping quantization loss evaluation (--skip-loss-report)")
 
     # -----------------------------------------------------------------------
     # Outputs
@@ -386,15 +462,9 @@ def main():
 
     print("[4/4] Outputs written:")
 
-    for suffix in (".espdl", ".info", ".json"):
-        p = espdl_path.with_suffix(suffix)
+    report_model_sizes(onnx_path, espdl_path, repo_root)
 
-        if p.exists():
-            size_kb = p.stat().st_size / 1024
-
-            print(f"  {p.relative_to(repo_root)} ({size_kb:.1f} KB)")
-
-    print("\nDone. Flash with:\n  idf.py flash monitor -p /dev/ttyUSB0")
+    print("Done. Flash with:\n  idf.py flash monitor -p /dev/ttyUSB0")
 
 
 if __name__ == "__main__":
