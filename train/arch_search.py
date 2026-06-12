@@ -34,7 +34,7 @@ DATASET = "kws"
 MULTI_LAYER = False
 EXPERIMENT_NAME = "2"
 STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
-ONNX_DIR = f"src/models/{STUDY_NAME}"
+ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
 
 if MODEL == "mamba-1":
     N_WORKERS = 1

@@ -3,7 +3,7 @@ import torch
 from .onnx_utils import confusion_matrix_onnx
 from .kws_dataset_gen import IDX2LABEL
 from .data import SpeechCommandsMFCC
-onnx_path = os.path.join("src", "models", "kws-mamba-1.onnx")
+onnx_path = os.path.join(os.path.expanduser("~"), "Models", "kws-mamba-1.onnx")
 # onnx_path = "/tmp/kws-mamba-1-dry.onnx"
 
 val_ds = SpeechCommandsMFCC.load(os.path.expanduser("~/Datasets/speech_commands_v0.02_augmented/val.pkl"))

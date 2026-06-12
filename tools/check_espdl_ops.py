@@ -7,7 +7,7 @@ Checks every op in one or more ONNX graphs against the ESP-DL support matrix
 
 Usage:
     python check_espdl_ops.py model.onnx [model2.onnx ...]
-    python check_espdl_ops.py src/models/*.onnx --target esp32s3
+    python check_espdl_ops.py ~/Models/*.onnx --target esp32s3
     python check_espdl_ops.py model.onnx --show-all --json
 """
 

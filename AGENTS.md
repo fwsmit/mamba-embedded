@@ -9,7 +9,7 @@ This project trains **Mamba state-space models (SSMs)** and deploys them on **ES
 | `train/` | PyTorch training, ONNX export, quantization |
 | `esp-dl/` | ESP-IDF project for ESP32-S3 inference |
 | `tools/` | ESP-DL operator compatibility checker |
-| `src/models/` | Exported ONNX models |
+| `~/Models/` | Exported ONNX models |
 | `data/` | Datasets (HAR, SpeechCommands) |
 | `build-esp-dl.sh` | Build, flash, and monitor the ESP-DL project |
 
@@ -45,8 +45,8 @@ Set `MODEL` (e.g., `mamba-1`, `mamba-3`) and `DATASET` (e.g., `har`, `kws`) as e
 
 ## Model Pipeline
 
-1. **Train** → exports `src/models/<model>.onnx`
-2. **Check op compatibility** → `python tools/check_espdl_ops.py src/models/<model>.onnx`
+1. **Train** → exports `~/Models/<model>.onnx`
+2. **Check op compatibility** → `python tools/check_espdl_ops.py ~/Models/<model>.onnx`
 3. **Quantize** → generates `.espdl` file placed in `esp-dl/main/model/`
 4. **Build & flash** → `./build-esp-dl.sh`
 

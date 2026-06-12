@@ -154,7 +154,7 @@ def train_model_and_test_accuracy(seed):
         # if trial.should_prune():
         #     raise optuna.exceptions.TrialPruned()
 
-    # onnx_path = "src/models/har-trial-model.onnx"
+    # onnx_path = os.path.expanduser("~/Models/har-trial-model.onnx")
     # export_onnx(model, "har", onnx_path, DEVICE)
     #
     # success, latency_ms = run_on_device()      # flash + parse

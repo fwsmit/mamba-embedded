@@ -202,7 +202,7 @@ def main():
 
     model_name = f"{dataset_type}-{model_type}"
     dry_run_name = ""
-    model_dir = os.path.join("./src", "models")
+    model_dir = os.path.expanduser("~/Models")
     if args.dry_run:
         dry_run_name = "-dry"
         model_dir = "/tmp"
