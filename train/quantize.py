@@ -453,10 +453,12 @@ def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
 
         espdl_graph_overhead = flatbuf_size - espdl_param_size
 
+        reduction_pct = (param_size - espdl_param_size) / param_size * 100.0 if param_size > 0 else 0.0
+
         print(f"  │  ESP-DL model (model.espdl)                    │")
         print(f"  │    Total      : {total / 1024:>8.1f} KB              │")
-        print(f"  │    Header     : {header_overhead / 1024:>8.1f} KB              │")
         print(f"  │    Parameters : {espdl_param_size / 1024:>8.1f} KB              │")
+        print(f"  │      ({reduction_pct:.1f}% reduction from float)        │")
         print(f"  │    Graph      : {espdl_graph_overhead / 1024:>8.1f} KB              │")
         if trailing_pad > 0:
             print(f"  │    Padding    : {trailing_pad / 1024:>8.1f} KB              │")
