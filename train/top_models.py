@@ -281,7 +281,7 @@ def main() -> None:
     print()
 
     for tn in selected_trials:
-        onnx_path = onnx_dir / f"{dataset}-{study_parts[0]}-trial-{tn}.onnx"
+        onnx_path = onnx_dir / f"{args.study_name}-trial-{tn}.onnx"
         if not onnx_path.exists():
             print(f"  WARNING: ONNX file not found, skipping trial #{tn}: {onnx_path}")
             continue
