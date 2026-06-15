@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Select the top fraction of models from an Optuna HPO study using greedy
-hypervolume contribution selection.
+hypervolume contribution selection, then quantize each selected model to
+ESP-DL .espdl format.
 
 Usage:
     python -m train.top_models --study-name mamba-1-kws-2
@@ -10,10 +11,22 @@ Usage:
 
 import argparse
 import sys
+from pathlib import Path
 
 import numpy as np
 import optuna
 from optuna.trial import TrialState
+
+from .quantize import (
+    quantize_onnx_to_espdl,
+    load_calibration,
+    infer_input_shape,
+    collate_fn,
+    CALIB_STEPS,
+    CALIB_BATCH,
+    TARGET,
+    NUM_OF_BITS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +241,75 @@ def main() -> None:
             for tn in selected_trials:
                 f.write(f"{tn}\n")
         print(f"Written to {args.output}")
+
+    # ---- Quantize each selected model -----------------------------------
+    print()
+    print("=" * 62)
+    print("  QUANTIZING SELECTED MODELS")
+    print("=" * 62)
+    print()
+
+    # Infer dataset from study name (second component, e.g. "mamba-1-kws-2" -> "kws")
+    study_parts = args.study_name.split("-")
+    known_datasets = {"har", "kws"}
+    dataset = None
+    for part in study_parts:
+        if part in known_datasets:
+            dataset = part
+            break
+    if dataset is None:
+        print(
+            f"ERROR: could not infer dataset from study name '{args.study_name}'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    onnx_dir = Path.home() / "Models" / args.study_name
+
+    n_calib_samples = CALIB_STEPS * CALIB_BATCH
+
+    print(f"  Dataset          : {dataset}")
+    print(f"  ONNX directory   : {onnx_dir}")
+    print(f"  Calibration steps: {CALIB_STEPS}")
+    print()
+
+    # Build one calibration dataloader, reused for all models
+    print("[1/3] Building calibration dataloader ...")
+    calib_loader = load_calibration(dataset, repo_root, n_calib_samples)
+    print(f"  Loaded {n_calib_samples} calibration samples")
+    print()
+
+    for tn in selected_trials:
+        onnx_path = onnx_dir / f"{dataset}-{study_parts[0]}-trial-{tn}.onnx"
+        if not onnx_path.exists():
+            print(f"  WARNING: ONNX file not found, skipping trial #{tn}: {onnx_path}")
+            continue
+
+        espdl_path = onnx_path.with_suffix(".espdl")
+
+        input_shape = infer_input_shape(onnx_path)
+
+        print(f"  Trial #{tn}: {onnx_path.name}")
+        print(f"    Input shape : {input_shape}")
+        print(f"    Output      : {espdl_path}")
+
+        quantize_onnx_to_espdl(
+            onnx_path=onnx_path,
+            espdl_path=espdl_path,
+            calib_loader=calib_loader,
+            calib_steps=CALIB_STEPS,
+            input_shape=input_shape,
+            target=TARGET,
+            num_of_bits=NUM_OF_BITS,
+            device="cpu",
+            collate_fn=collate_fn,
+        )
+
+        print(f"    Done.")
+        print()
+
+    print("All selected models quantized.")
 
 
 if __name__ == "__main__":
