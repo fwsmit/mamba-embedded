@@ -260,7 +260,7 @@ def objective(trial):
     for epoch in range(1, EPOCHS+1):
         train(model, DEVICE, train_loader, optimizer, epoch, print_stats=True)
 
-    onnx_path = f"{ONNX_DIR}/{DATASET}-{MODEL}-trial-{trial.number}.onnx"
+    onnx_path = f"{ONNX_DIR}/{STUDY_NAME}-trial-{trial.number}.onnx"
     export_onnx(model, DATASET, onnx_path, DEVICE)
     success, latency_us = run_on_pc(onnx_path)
     if not success:
