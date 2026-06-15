@@ -468,6 +468,79 @@ def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
 
 
 # ---------------------------------------------------------------------------
+# Quantization function
+# ---------------------------------------------------------------------------
+
+
+def quantize_onnx_to_espdl(
+    onnx_path: str | Path,
+    espdl_path: str | Path,
+    calib_loader: DataLoader,
+    calib_steps: int = CALIB_STEPS,
+    input_shape: list[int] | None = None,
+    target: str = TARGET,
+    num_of_bits: int = NUM_OF_BITS,
+    device: str = "cpu",
+    collate_fn=collate_fn,
+) -> BaseGraph:
+    """
+    Quantize an ONNX model to ESP-DL .espdl format.
+
+    Parameters
+    ----------
+    onnx_path : str or Path
+        Path to the input ONNX model file.
+    espdl_path : str or Path
+        Path for the output .espdl file (directory is created if needed).
+    calib_loader : DataLoader
+        DataLoader supplying calibration samples.
+    calib_steps : int
+        Number of calibration batches to run.
+    input_shape : list[int] or None
+        Expected input shape. If None, inferred from the ONNX model.
+    target : str
+        Target platform (default: "esp32s3").
+    num_of_bits : int
+        Quantization bit-width (8 or 16).
+    device : str
+        Device for PPQ calibration: "cpu" or "cuda".
+    collate_fn : callable
+        Collate function for the calibration dataloader.
+
+    Returns
+    -------
+    BaseGraph
+        The quantized PPQ graph for further inspection or analysis.
+    """
+    onnx_path = Path(onnx_path)
+    espdl_path = Path(espdl_path)
+
+    if input_shape is None:
+        input_shape = infer_input_shape(onnx_path)
+
+    espdl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    quant_graph = espdl_quantize_onnx(
+        onnx_import_file=str(onnx_path),
+        espdl_export_file=str(espdl_path),
+        calib_dataloader=calib_loader,
+        calib_steps=calib_steps,
+        input_shape=input_shape,
+        target=target,
+        num_of_bits=num_of_bits,
+        collate_fn=collate_fn,
+        device=device,
+        export_test_values=True,
+        error_report=True,
+        skip_export=False,
+        verbose=0,
+        dispatching_override=None,
+    )
+
+    return quant_graph
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -535,21 +608,16 @@ def main():
 
     print("\n[2/4] Running PTQ ...")
 
-    quant_graph = espdl_quantize_onnx(
-        onnx_import_file=str(onnx_path),
-        espdl_export_file=str(espdl_path),
-        calib_dataloader=calib_loader,
+    quant_graph = quantize_onnx_to_espdl(
+        onnx_path=onnx_path,
+        espdl_path=espdl_path,
+        calib_loader=calib_loader,
         calib_steps=args.calib_steps,
         input_shape=input_shape,
         target=TARGET,
         num_of_bits=args.bits,
-        collate_fn=collate_fn,
         device=args.device,
-        export_test_values=True,
-        error_report=True,
-        skip_export=False,
-        verbose=0,
-        dispatching_override=None,
+        collate_fn=collate_fn,
     )
 
     # -----------------------------------------------------------------------

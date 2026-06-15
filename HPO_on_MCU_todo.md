@@ -5,7 +5,7 @@ then the model is tested on the microcontroller for a latency test. The top 10% 
 Pick the first item that is not finished and write code to do this task.
 
 - [x] Find the top 10% of models. Greedily add items one at a time, always choosing the one that increases hypervolume most
-- [x] Quantize the model and measure the accuracy of the quantized model on the PC.
+- [ ] Quantize the model and measure the accuracy of the quantized model on the PC.
 - [ ] Store the unquantized accuracy and the quantized accuracy of the model in a json file (all results of one study should be in one json file)
 - [ ] Run the model on the microcontroller (in a loop 10 times) and find the average latency.
 - [ ] Store the PC latency and the microcontroller latency in the same json file
