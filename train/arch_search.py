@@ -30,9 +30,9 @@ BATCHSIZE = 128
 EPOCHS = 2
 dataset_dir = os.path.expanduser("~/Datasets")
 MODEL = "mamba-1"
-DATASET = "kws"
+DATASET = "har"
 MULTI_LAYER = False
-EXPERIMENT_NAME = "2"
+EXPERIMENT_NAME = "bidir"
 STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
 ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
 
@@ -199,6 +199,7 @@ def define_mamba1_model(trial):
         d_conv=d_conv,
         expand=expand,
         n_layers=n_layers,
+        bidirectional=True,
     )
     return model
 
@@ -278,7 +279,10 @@ def run_optimization(_):
         storage=STORAGE_URL,
         sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     )
-    study.optimize(objective, n_trials=100 // N_WORKERS)
+    study.optimize(
+        objective,
+        callbacks=[optuna.MaxTrialsCallback(100, states=(optuna.TrialState.COMPLETE))]
+    )
 
 
 if __name__ == "__main__":
