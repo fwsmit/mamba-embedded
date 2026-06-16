@@ -56,11 +56,11 @@ The `--config-name` flag selects which configuration file to use (the `.yaml` ex
 
 | Config file | Model | Dataset | Multi-layer |
 |---|---|---|---|
-| `arch-mamba1-kws.yaml` | mamba-1 | kws | no |
-| `arch-mamba1-har.yaml` | mamba-1 | har | no |
-| `arch-mamba3-kws.yaml` | mamba-3 | kws | no |
-| `arch-mamba3-har.yaml` | mamba-3 | har | no |
-| `arch-mamba1-kws-multi.yaml` | mamba-1 | kws | yes |
+| `arch-mamba1-kws.yaml` | mamba-1 | kws | fixed (1 layer) |
+| `arch-mamba1-har.yaml` | mamba-1 | har | fixed (1 layer) |
+| `arch-mamba3-kws.yaml` | mamba-3 | kws | fixed (1 layer) |
+| `arch-mamba3-har.yaml` | mamba-3 | har | fixed (1 layer) |
+| `arch-mamba1-kws-multi.yaml` | mamba-1 | kws | searched over n_layers |
 
 To add a new search configuration, create a new YAML file in `config/` with these fields:
 
@@ -69,7 +69,6 @@ BATCHSIZE: 128
 EPOCHS: 2
 MODEL: mamba-1          # "mamba-1" or "mamba-3"
 DATASET: kws            # "kws" or "har"
-MULTI_LAYER: false      # search over number of layers
 EXPERIMENT_NAME: "v2"   # distinguishes this experiment in the Optuna study name
 
 SEARCH_SPACE:
@@ -87,7 +86,7 @@ SEARCH_SPACE:
     high: 4
   n_layers:
     low: 1
-    high: 10
+    high: 1   # set low=high to fix at a single value (no suggest_int call)
 ```
 
 The `SEARCH_SPACE` section defines the Optuna `suggest_*` ranges for each model parameter. For integer parameters without a step, only `low`/`high` are needed. For categorical parameters, use `choices` (e.g. `nheads: {choices: [1, 2, 4, 8]}`). For parameters with a step, add `step` (e.g. `d_model: {low: 8, high: 32, step: 4}`). Only the parameters relevant to the chosen model type are used (`mamba-1` ignores `nheads`).

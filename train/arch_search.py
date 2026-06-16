@@ -34,7 +34,6 @@ BATCHSIZE = None
 EPOCHS = None
 MODEL = None
 DATASET = None
-MULTI_LAYER = None
 EXPERIMENT_NAME = None
 STUDY_NAME = None
 ONNX_DIR = None
@@ -180,6 +179,8 @@ def run_on_device(timeout: float = 120.0):
 
 
 def _suggest_from_space(trial, name, space):
+    if space.low == space.high:
+        return space.low
     if "choices" in space:
         return trial.suggest_categorical(name, space["choices"])
     if "step" in space:
@@ -192,10 +193,7 @@ def define_mamba1_model(trial, search_space):
     d_state = _suggest_from_space(trial, "d_state", search_space.d_state)
     d_conv = _suggest_from_space(trial, "d_conv", search_space.d_conv)
     expand = _suggest_from_space(trial, "expand", search_space.expand)
-    if MULTI_LAYER:
-        n_layers = _suggest_from_space(trial, "n_layers", search_space.n_layers)
-    else:
-        n_layers = 1
+    n_layers = _suggest_from_space(trial, "n_layers", search_space.n_layers)
 
     model = MambaWrapper(
         mamba_model=Mamba,
@@ -216,10 +214,7 @@ def define_mamba3_model(trial, search_space):
     d_state = _suggest_from_space(trial, "d_state", search_space.d_state)
     expand = _suggest_from_space(trial, "expand", search_space.expand)
 
-    if MULTI_LAYER:
-        n_layers = _suggest_from_space(trial, "n_layers", search_space.n_layers)
-    else:
-        n_layers = 1
+    n_layers = _suggest_from_space(trial, "n_layers", search_space.n_layers)
 
     d_inner = d_model * expand
     nheads = _suggest_from_space(trial, "nheads", search_space.nheads)
@@ -294,13 +289,12 @@ def run_optimization(_):
 
 @hydra_main(config_path="../config", config_name="arch-mamba1-kws", version_base=None)
 def main(cfg: DictConfig):
-    global BATCHSIZE, EPOCHS, MODEL, DATASET, MULTI_LAYER, EXPERIMENT_NAME
+    global BATCHSIZE, EPOCHS, MODEL, DATASET, EXPERIMENT_NAME
     global STUDY_NAME, ONNX_DIR, N_WORKERS, SEARCH_SPACE
     BATCHSIZE = cfg.BATCHSIZE
     EPOCHS = cfg.EPOCHS
     MODEL = cfg.MODEL
     DATASET = cfg.DATASET
-    MULTI_LAYER = cfg.MULTI_LAYER
     EXPERIMENT_NAME = cfg.EXPERIMENT_NAME
     SEARCH_SPACE = cfg.SEARCH_SPACE
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
@@ -325,7 +319,6 @@ def main(cfg: DictConfig):
     print(f"  Experiment     : {EXPERIMENT_NAME}")
     print(f"  Batch size     : {BATCHSIZE}")
     print(f"  Epochs         : {EPOCHS}")
-    print(f"  Multi-layer    : {MULTI_LAYER}")
     print(f"  Workers        : {N_WORKERS}")
     print(f"  ONNX dir       : {ONNX_DIR}")
     print(f"  Storage        : {STORAGE_URL}")
