@@ -1,4 +1,5 @@
 import os
+import hydra
 
 import numpy as np
 import onnxruntime as ort
@@ -26,21 +27,17 @@ _device_lock = FileLock("/tmp/mcu.lock")
 
 
 DEVICE = torch.device("cuda")
-BATCHSIZE = 128
-EPOCHS = 2
 dataset_dir = os.path.expanduser("~/Datasets")
-MODEL = "mamba-1"
-DATASET = "har"
-MULTI_LAYER = False
-EXPERIMENT_NAME = "bidir"
-STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
-ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
 
-if MODEL == "mamba-1":
-    N_WORKERS = 1
-else:
-    N_WORKERS = 3
-
+BATCHSIZE = None
+EPOCHS = None
+MODEL = None
+DATASET = None
+MULTI_LAYER = None
+EXPERIMENT_NAME = None
+STUDY_NAME = None
+ONNX_DIR = None
+N_WORKERS = None
 
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
@@ -285,7 +282,20 @@ def run_optimization(_):
     )
 
 
-if __name__ == "__main__":
+@hydra.main(config_path="conf", config_name="config", version_base=None)
+def main(cfg):
+    global BATCHSIZE, EPOCHS, MODEL, DATASET, MULTI_LAYER, EXPERIMENT_NAME
+    global STUDY_NAME, ONNX_DIR, N_WORKERS
+    BATCHSIZE = cfg.BATCHSIZE
+    EPOCHS = cfg.EPOCHS
+    MODEL = cfg.MODEL
+    DATASET = cfg.DATASET
+    MULTI_LAYER = cfg.MULTI_LAYER
+    EXPERIMENT_NAME = cfg.EXPERIMENT_NAME
+    STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
+    ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
+    N_WORKERS = 1 if MODEL == "mamba-1" else 3
+
     study = optuna.create_study(
         study_name=STUDY_NAME,
         storage=STORAGE_URL,
@@ -320,3 +330,7 @@ if __name__ == "__main__":
         print("  Params   :")
         for key, value in trial.params.items():
             print(f"    {key:<12} = {value}")
+
+
+if __name__ == "__main__":
+    main()
