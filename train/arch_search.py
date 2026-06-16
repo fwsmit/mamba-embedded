@@ -282,7 +282,7 @@ def run_optimization(_):
     )
 
 
-@hydra.main(config_path="conf", config_name="config", version_base=None)
+@hydra.main(config_path="../config", config_name="config", version_base=None)
 def main(cfg):
     global BATCHSIZE, EPOCHS, MODEL, DATASET, MULTI_LAYER, EXPERIMENT_NAME
     global STUDY_NAME, ONNX_DIR, N_WORKERS
@@ -305,6 +305,19 @@ def main(cfg):
     )
     study.set_metric_names(["Accuracy", "Latency"])
     os.makedirs(ONNX_DIR, exist_ok=True)
+
+    print(f"── Starting architecture search ─────────────────")
+    print(f"  Model          : {MODEL}")
+    print(f"  Dataset        : {DATASET}")
+    print(f"  Experiment     : {EXPERIMENT_NAME}")
+    print(f"  Batch size     : {BATCHSIZE}")
+    print(f"  Epochs         : {EPOCHS}")
+    print(f"  Multi-layer    : {MULTI_LAYER}")
+    print(f"  Workers        : {N_WORKERS}")
+    print(f"  ONNX dir       : {ONNX_DIR}")
+    print(f"  Storage        : {STORAGE_URL}")
+    print(f"  Study name     : {STUDY_NAME}")
+    print()
 
     if N_WORKERS > 1:
         # Make multiprocessing work with cuda

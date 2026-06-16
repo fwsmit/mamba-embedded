@@ -1,0 +1,11 @@
+hydra:
+  job:
+    chdir: false
+  output_subdir: null
+
+BATCHSIZE: 128
+EPOCHS: 2
+MODEL: mamba-1
+DATASET: kws
+MULTI_LAYER: false
+EXPERIMENT_NAME: "2"
