@@ -1,6 +1,4 @@
 import os
-import argparse
-import yaml
 
 import numpy as np
 import onnxruntime as ort
@@ -16,6 +14,8 @@ import re
 import time
 import pty
 from multiprocessing import Pool, set_start_method
+from hydra import main as hydra_main
+from omegaconf import DictConfig
 from mamba_ssm import Mamba, Mamba3
 
 from .models import MambaWrapper
@@ -39,6 +39,7 @@ EXPERIMENT_NAME = None
 STUDY_NAME = None
 ONNX_DIR = None
 N_WORKERS = None
+SEARCH_SPACE = None
 
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
@@ -178,13 +179,21 @@ def run_on_device(timeout: float = 120.0):
         return parse_device_result(output)
 
 
-def define_mamba1_model(trial):
-    d_model = trial.suggest_int("d_model", 8, 32)
-    d_state = trial.suggest_int("d_state", 8, 16)
-    d_conv = trial.suggest_int("d_conv", 2, 4)
-    expand = trial.suggest_int("expand", 1, 4)
+def _suggest_from_space(trial, name, space):
+    if "choices" in space:
+        return trial.suggest_categorical(name, space["choices"])
+    if "step" in space:
+        return trial.suggest_int(name, space["low"], space["high"], step=space["step"])
+    return trial.suggest_int(name, space["low"], space["high"])
+
+
+def define_mamba1_model(trial, search_space):
+    d_model = _suggest_from_space(trial, "d_model", search_space.d_model)
+    d_state = _suggest_from_space(trial, "d_state", search_space.d_state)
+    d_conv = _suggest_from_space(trial, "d_conv", search_space.d_conv)
+    expand = _suggest_from_space(trial, "expand", search_space.expand)
     if MULTI_LAYER:
-        n_layers = trial.suggest_int("n_layers", 1, 10)
+        n_layers = _suggest_from_space(trial, "n_layers", search_space.n_layers)
     else:
         n_layers = 1
 
@@ -202,18 +211,18 @@ def define_mamba1_model(trial):
     return model
 
 
-def define_mamba3_model(trial):
-    d_model = trial.suggest_int("d_model", 8, 32, step=4)
-    d_state = trial.suggest_int("d_state", 8, 16, step=2)
-    expand = trial.suggest_int("expand", 1, 4)
+def define_mamba3_model(trial, search_space):
+    d_model = _suggest_from_space(trial, "d_model", search_space.d_model)
+    d_state = _suggest_from_space(trial, "d_state", search_space.d_state)
+    expand = _suggest_from_space(trial, "expand", search_space.expand)
 
     if MULTI_LAYER:
-        n_layers = trial.suggest_int("n_layers", 1, 10)
+        n_layers = _suggest_from_space(trial, "n_layers", search_space.n_layers)
     else:
         n_layers = 1
 
     d_inner = d_model * expand
-    nheads = trial.suggest_categorical("nheads", [1, 2, 4, 8])
+    nheads = _suggest_from_space(trial, "nheads", search_space.nheads)
     if d_inner % (2 * nheads) != 0:
         raise optuna.exceptions.TrialPruned()
     headdim = d_inner // nheads
@@ -233,9 +242,9 @@ def define_mamba3_model(trial):
 def objective(trial):
     # Generate the model.
     if MODEL == "mamba-1":
-        model = define_mamba1_model(trial).to(DEVICE)
+        model = define_mamba1_model(trial, SEARCH_SPACE).to(DEVICE)
     elif MODEL == "mamba-3":
-        model = define_mamba3_model(trial).to(DEVICE)
+        model = define_mamba3_model(trial, SEARCH_SPACE).to(DEVICE)
     else:
         raise ValueError("Unknown model type:", MODEL)
 
@@ -283,33 +292,22 @@ def run_optimization(_):
     )
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Mamba architecture search via Optuna")
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Configuration file for the architecture search (e.g. config/arch-mamba1-kws.yaml)",
-    )
-    args = parser.parse_args()
-
-    config_path = os.path.join(os.path.dirname(__file__), "..", args.config)
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
-
-    print(f"Loaded configuration from {args.config}")
-
+@hydra_main(config_path="../config", config_name="arch-mamba1-kws", version_base=None)
+def main(cfg: DictConfig):
     global BATCHSIZE, EPOCHS, MODEL, DATASET, MULTI_LAYER, EXPERIMENT_NAME
-    global STUDY_NAME, ONNX_DIR, N_WORKERS
-    BATCHSIZE = cfg["BATCHSIZE"]
-    EPOCHS = cfg["EPOCHS"]
-    MODEL = cfg["MODEL"]
-    DATASET = cfg["DATASET"]
-    MULTI_LAYER = cfg["MULTI_LAYER"]
-    EXPERIMENT_NAME = cfg["EXPERIMENT_NAME"]
+    global STUDY_NAME, ONNX_DIR, N_WORKERS, SEARCH_SPACE
+    BATCHSIZE = cfg.BATCHSIZE
+    EPOCHS = cfg.EPOCHS
+    MODEL = cfg.MODEL
+    DATASET = cfg.DATASET
+    MULTI_LAYER = cfg.MULTI_LAYER
+    EXPERIMENT_NAME = cfg.EXPERIMENT_NAME
+    SEARCH_SPACE = cfg.SEARCH_SPACE
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
     N_WORKERS = 1 if MODEL == "mamba-1" else 3
+
+    print(f"Loaded configuration: {cfg}")
 
     study = optuna.create_study(
         study_name=STUDY_NAME,

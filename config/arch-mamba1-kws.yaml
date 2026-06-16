@@ -9,3 +9,20 @@ MODEL: mamba-1
 DATASET: kws
 MULTI_LAYER: false
 EXPERIMENT_NAME: "2"
+
+SEARCH_SPACE:
+  d_model:
+    low: 8
+    high: 32
+  d_state:
+    low: 8
+    high: 16
+  d_conv:
+    low: 2
+    high: 4
+  expand:
+    low: 1
+    high: 4
+  n_layers:
+    low: 1
+    high: 10

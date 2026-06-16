@@ -45,14 +45,14 @@ Set `MODEL` (e.g., `mamba-1`, `mamba-3`) and `DATASET` (e.g., `har`, `kws`) as e
 
 ## Architecture Search
 
-Run an Optuna-based hyperparameter search with a pre-defined configuration:
+Run an Optuna-based hyperparameter search with a pre-defined configuration using Hydra:
 
 ```bash
 conda activate torch-pascal
-python -m train.arch_search --config config/arch-mamba1-kws.yaml
+python -m train.arch_search --config-name arch-mamba1-kws
 ```
 
-The `--config` flag is **required** and selects which configuration file to use. Available configs in `config/`:
+The `--config-name` flag selects which configuration file to use (the `.yaml` extension is optional). Available configs in `config/`:
 
 | Config file | Model | Dataset | Multi-layer |
 |---|---|---|---|
@@ -71,7 +71,26 @@ MODEL: mamba-1          # "mamba-1" or "mamba-3"
 DATASET: kws            # "kws" or "har"
 MULTI_LAYER: false      # search over number of layers
 EXPERIMENT_NAME: "v2"   # distinguishes this experiment in the Optuna study name
+
+SEARCH_SPACE:
+  d_model:
+    low: 8
+    high: 32
+  d_state:
+    low: 8
+    high: 16
+  d_conv:
+    low: 2
+    high: 4
+  expand:
+    low: 1
+    high: 4
+  n_layers:
+    low: 1
+    high: 10
 ```
+
+The `SEARCH_SPACE` section defines the Optuna `suggest_*` ranges for each model parameter. For integer parameters without a step, only `low`/`high` are needed. For categorical parameters, use `choices` (e.g. `nheads: {choices: [1, 2, 4, 8]}`). For parameters with a step, add `step` (e.g. `d_model: {low: 8, high: 32, step: 4}`). Only the parameters relevant to the chosen model type are used (`mamba-1` ignores `nheads`).
 
 Results are stored in an Optuna SQLite database (`mamba_hpo.db`) and ONNX files in `~/Models/<MODEL>-<DATASET>-<EXPERIMENT_NAME>/`.
 
