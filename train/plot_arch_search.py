@@ -75,79 +75,88 @@ def pareto_mask(df):
                 break
     return ~dominated
 
-# ── Load ──────────────────────────────────────────────────────────────────────
-print("Loading studies …")
-study_m1 = load_study(STUDY_M1)
-study_m3 = load_study(STUDY_M3)
 
-df_m1 = trials_df(study_m1)
-df_m3 = trials_df(study_m3)
-
-mask_m1 = pareto_mask(df_m1)
-mask_m3 = pareto_mask(df_m3)
-
-print(f"  {STUDY_M1}: {len(df_m1)} trials, {mask_m1.sum()} Pareto-optimal")
-print(f"  {STUDY_M3}: {len(df_m3)} trials, {mask_m3.sum()} Pareto-optimal")
-
-# Sort Pareto fronts by latency for clean line drawing
-def pareto_sorted(df, mask):
-    p = df[mask].copy()
-    return p.sort_values("latency")
-
-par_m1 = pareto_sorted(df_m1, mask_m1)
-par_m3 = pareto_sorted(df_m3, mask_m3)
-
-# ── Helper: shared param columns ──────────────────────────────────────────────
-shared_params = sorted(set(df_m1.columns) & set(df_m3.columns) - {"accuracy", "latency", "number"})
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Figure 1 – Pareto Front Comparison  (main money plot)
 # ═══════════════════════════════════════════════════════════════════════════════
-fig1, ax = plt.subplots(figsize=(9, 6))
+def create_pareto_front_plot(df_m1, df_m3, par_m1, par_m3):
+    """Plot and save the Pareto front comparison figure."""
+    fig1, ax = plt.subplots(figsize=(9, 6))
 
-# All trials (faint)
-ax.scatter(df_m1["latency"], df_m1["accuracy"],
-           color=COLOR_M1, alpha=ALPHA_ALL, s=22, marker=MARKER_ALL, zorder=2)
-ax.scatter(df_m3["latency"], df_m3["accuracy"],
-           color=COLOR_M3, alpha=ALPHA_ALL, s=22, marker=MARKER_ALL, zorder=2)
+    # All trials (faint)
+    ax.scatter(df_m1["latency"], df_m1["accuracy"],
+               color=COLOR_M1, alpha=ALPHA_ALL, s=22, marker=MARKER_ALL, zorder=2)
+    ax.scatter(df_m3["latency"], df_m3["accuracy"],
+               color=COLOR_M3, alpha=ALPHA_ALL, s=22, marker=MARKER_ALL, zorder=2)
 
-# Pareto-optimal points
-ax.scatter(par_m1["latency"], par_m1["accuracy"],
-           color=PARETO_M1, alpha=ALPHA_PARETO, s=70, marker=MARKER_PAR,
-           edgecolors="white", linewidths=0.6, zorder=4, label=f"{STUDY_M1} Pareto")
-ax.scatter(par_m3["latency"], par_m3["accuracy"],
-           color=PARETO_M3, alpha=ALPHA_PARETO, s=70, marker=MARKER_PAR,
-           edgecolors="white", linewidths=0.6, zorder=4, label=f"{STUDY_M3} Pareto")
+    # Pareto-optimal points
+    ax.scatter(par_m1["latency"], par_m1["accuracy"],
+               color=PARETO_M1, alpha=ALPHA_PARETO, s=70, marker=MARKER_PAR,
+               edgecolors="white", linewidths=0.6, zorder=4, label=f"{STUDY_M1} Pareto")
+    ax.scatter(par_m3["latency"], par_m3["accuracy"],
+               color=PARETO_M3, alpha=ALPHA_PARETO, s=70, marker=MARKER_PAR,
+               edgecolors="white", linewidths=0.6, zorder=4, label=f"{STUDY_M3} Pareto")
 
-# Pareto step-lines (staircase front)
-ax.step(par_m1["latency"], par_m1["accuracy"],
-        color=PARETO_M1, linewidth=1.8, where="post", zorder=3)
-ax.step(par_m3["latency"], par_m3["accuracy"],
-        color=PARETO_M3, linewidth=1.8, where="post", zorder=3)
+    # Pareto step-lines (staircase front)
+    ax.step(par_m1["latency"], par_m1["accuracy"],
+            color=PARETO_M1, linewidth=1.8, where="post", zorder=3)
+    ax.step(par_m3["latency"], par_m3["accuracy"],
+            color=PARETO_M3, linewidth=1.8, where="post", zorder=3)
 
-# ax.yaxis.set_major_locator(ticker.LinearLocator(11))
-ax.set_yticks(np.arange(0, 1.1, 0.1))
+    # ax.yaxis.set_major_locator(ticker.LinearLocator(11))
+    ax.set_yticks(np.arange(0, 1.1, 0.1))
 
-# Legend with all-trials proxy
-legend_elements = [
-    Line2D([0], [0], marker=MARKER_PAR, color="w", markerfacecolor=PARETO_M1,
-           markersize=9, label=f"{STUDY_M1} — Pareto front"),
-    Line2D([0], [0], marker=MARKER_PAR, color="w", markerfacecolor=PARETO_M3,
-           markersize=9, label=f"{STUDY_M3} — Pareto front"),
-    Line2D([0], [0], marker=MARKER_ALL, color="w", markerfacecolor=COLOR_M1,
-           markersize=7, alpha=0.7, label=f"{STUDY_M1} — all trials"),
-    Line2D([0], [0], marker=MARKER_ALL, color="w", markerfacecolor=COLOR_M3,
-           markersize=7, alpha=0.7, label=f"{STUDY_M3} — all trials"),
-]
-ax.legend(handles=legend_elements, framealpha=0.9, fontsize=9)
+    # Legend with all-trials proxy
+    legend_elements = [
+        Line2D([0], [0], marker=MARKER_PAR, color="w", markerfacecolor=PARETO_M1,
+               markersize=9, label=f"{STUDY_M1} — Pareto front"),
+        Line2D([0], [0], marker=MARKER_PAR, color="w", markerfacecolor=PARETO_M3,
+               markersize=9, label=f"{STUDY_M3} — Pareto front"),
+        Line2D([0], [0], marker=MARKER_ALL, color="w", markerfacecolor=COLOR_M1,
+               markersize=7, alpha=0.7, label=f"{STUDY_M1} — all trials"),
+        Line2D([0], [0], marker=MARKER_ALL, color="w", markerfacecolor=COLOR_M3,
+               markersize=7, alpha=0.7, label=f"{STUDY_M3} — all trials"),
+    ]
+    ax.legend(handles=legend_elements, framealpha=0.9, fontsize=9)
 
-ax.set_xlabel("Latency on pc (us, lower is better)", fontsize=11)
-ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
-ax.set_title("Hyperparameter optimization: Mamba-1 vs Mamba-1 (improved dataset (KWS)", fontsize=13, fontweight="bold")
-ax.grid(True, alpha=0.3, linestyle="--")
-fig1.tight_layout()
-fig1.savefig(fig_path("fig1_pareto_front.png"), dpi=FIG_DPI)
-print("Saved figures/fig1_pareto_front.png")
+    ax.set_xlabel("Latency on pc (us, lower is better)", fontsize=11)
+    ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
+    ax.set_title("Hyperparameter optimization: Mamba-1 vs Mamba-1 (improved dataset (KWS)", fontsize=13, fontweight="bold")
+    ax.grid(True, alpha=0.3, linestyle="--")
+    fig1.tight_layout()
+    fig1.savefig(fig_path("fig1_pareto_front.png"), dpi=FIG_DPI)
+    print("Saved figures/fig1_pareto_front.png")
 
-print("\nAll figures saved. Done.")
-plt.show()
+
+def main():
+    # ── Load ──────────────────────────────────────────────────────────────────────
+    print("Loading studies …")
+    study_m1 = load_study(STUDY_M1)
+    study_m3 = load_study(STUDY_M3)
+
+    df_m1 = trials_df(study_m1)
+    df_m3 = trials_df(study_m3)
+
+    mask_m1 = pareto_mask(df_m1)
+    mask_m3 = pareto_mask(df_m3)
+
+    print(f"  {STUDY_M1}: {len(df_m1)} trials, {mask_m1.sum()} Pareto-optimal")
+    print(f"  {STUDY_M3}: {len(df_m3)} trials, {mask_m3.sum()} Pareto-optimal")
+
+    # Sort Pareto fronts by latency for clean line drawing
+    def pareto_sorted(df, mask):
+        p = df[mask].copy()
+        return p.sort_values("latency")
+
+    par_m1 = pareto_sorted(df_m1, mask_m1)
+    par_m3 = pareto_sorted(df_m3, mask_m3)
+
+    create_pareto_front_plot(df_m1, df_m3, par_m1, par_m3)
+
+    print("\nAll figures saved. Done.")
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
