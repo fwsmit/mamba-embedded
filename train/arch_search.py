@@ -35,6 +35,8 @@ EPOCHS = None
 MODEL = None
 DATASET = None
 EXPERIMENT_NAME = None
+BIDIRECTIONAL = None
+BIDIRECTIONAL_STRATEGY = None
 STUDY_NAME = None
 ONNX_DIR = None
 N_WORKERS = None
@@ -204,7 +206,8 @@ def define_mamba1_model(trial, search_space):
         d_conv=d_conv,
         expand=expand,
         n_layers=n_layers,
-        bidirectional=True,
+        bidirectional=BIDIRECTIONAL,
+        bidirectional_strategy=BIDIRECTIONAL_STRATEGY,
     )
     return model
 
@@ -230,6 +233,8 @@ def define_mamba3_model(trial, search_space):
         headdim=headdim,
         expand=expand,
         n_layers=n_layers,
+        bidirectional=BIDIRECTIONAL,
+        bidirectional_strategy=BIDIRECTIONAL_STRATEGY,
     )
     return model
 
@@ -290,12 +295,15 @@ def run_optimization(_):
 @hydra_main(config_path="../config", config_name="arch-mamba1-kws", version_base=None)
 def main(cfg: DictConfig):
     global BATCHSIZE, EPOCHS, MODEL, DATASET, EXPERIMENT_NAME
+    global BIDIRECTIONAL, BIDIRECTIONAL_STRATEGY
     global STUDY_NAME, ONNX_DIR, N_WORKERS, SEARCH_SPACE
     BATCHSIZE = cfg.BATCHSIZE
     EPOCHS = cfg.EPOCHS
     MODEL = cfg.MODEL
     DATASET = cfg.DATASET
     EXPERIMENT_NAME = cfg.EXPERIMENT_NAME
+    BIDIRECTIONAL = cfg.bidirectional
+    BIDIRECTIONAL_STRATEGY = cfg.bidirectional_strategy
     SEARCH_SPACE = cfg.SEARCH_SPACE
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}" if EXPERIMENT_NAME else f"{MODEL}-{DATASET}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
