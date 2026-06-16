@@ -335,10 +335,16 @@ def main() -> None:
         metrics["trial_number"] = tn
         results.append(metrics)
 
+        # Persist after every trial so partial results survive a crash
+        import json as _json
+        results_path = experiments_dir / "results.json"
+        with open(results_path, "w") as f:
+            _json.dump(results, f, indent=2)
+
         print(f"    Done.")
         print()
 
-    # ---- Write results.json ------------------------------------------------
+    # ---- Final write (redundant but harmless) ------------------------------
     import json as _json
     results_path = experiments_dir / "results.json"
     with open(results_path, "w") as f:
