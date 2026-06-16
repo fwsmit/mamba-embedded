@@ -292,8 +292,22 @@ def main() -> None:
     print(f"  Loaded {len(val_ds)} validation samples")
     print()
 
-    results = []
+    # Load existing results to avoid re-quantizing already-done trials
+    import json as _json
+    results_path = experiments_dir / "results.json"
+    results: list = []
+    if results_path.exists():
+        with open(results_path, "r") as _f:
+            results = _json.load(_f)
+        done_trials = {r["trial_number"] for r in results}
+        print(f"  Loaded {len(results)} existing results from {results_path}")
+    else:
+        done_trials = set()
+
     for tn in selected_trials:
+        if tn in done_trials:
+            print(f"  Trial #{tn}: already quantized, skipping")
+            continue
         src_onnx = onnx_dir / f"{args.study_name}-trial-{tn}.onnx"
         if not src_onnx.exists():
             print(f"  WARNING: ONNX file not found, skipping trial #{tn}: {src_onnx}")
@@ -336,8 +350,6 @@ def main() -> None:
         results.append(metrics)
 
         # Persist after every trial so partial results survive a crash
-        import json as _json
-        results_path = experiments_dir / "results.json"
         with open(results_path, "w") as f:
             _json.dump(results, f, indent=2)
 
@@ -345,8 +357,6 @@ def main() -> None:
         print()
 
     # ---- Final write (redundant but harmless) ------------------------------
-    import json as _json
-    results_path = experiments_dir / "results.json"
     with open(results_path, "w") as f:
         _json.dump(results, f, indent=2)
     print(f"Results written to {results_path}")
