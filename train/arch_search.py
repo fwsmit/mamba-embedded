@@ -297,7 +297,7 @@ def main(cfg: DictConfig):
     DATASET = cfg.DATASET
     EXPERIMENT_NAME = cfg.EXPERIMENT_NAME
     SEARCH_SPACE = cfg.SEARCH_SPACE
-    STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
+    STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}" if EXPERIMENT_NAME else f"{MODEL}-{DATASET}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
     N_WORKERS = 1 if MODEL == "mamba-1" else 3
 
