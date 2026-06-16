@@ -21,6 +21,8 @@ from optuna.trial import TrialState
 from .quantize import (
     quantize_onnx_to_espdl,
     load_calibration,
+    load_datasets,
+    evaluate_quantization_loss,
     infer_input_shape,
     collate_fn,
     CALIB_STEPS,
@@ -280,12 +282,17 @@ def main() -> None:
     print(f"  Calibration steps: {CALIB_STEPS}")
     print()
 
-    # Build one calibration dataloader, reused for all models
-    print("[1/3] Building calibration dataloader ...")
+    # Build calibration and validation dataloaders, reused for all models
+    print("Building calibration dataloader ...")
     calib_loader = load_calibration(dataset, repo_root, n_calib_samples)
     print(f"  Loaded {n_calib_samples} calibration samples")
+
+    print("Building validation dataloader ...")
+    _, val_ds, _ = load_datasets(dataset)
+    print(f"  Loaded {len(val_ds)} validation samples")
     print()
 
+    results = []
     for tn in selected_trials:
         src_onnx = onnx_dir / f"{args.study_name}-trial-{tn}.onnx"
         if not src_onnx.exists():
@@ -305,7 +312,7 @@ def main() -> None:
         print(f"    Input shape : {input_shape}")
         print(f"    Output      : {espdl_path}")
 
-        quantize_onnx_to_espdl(
+        quant_graph = quantize_onnx_to_espdl(
             onnx_path=onnx_path,
             espdl_path=espdl_path,
             calib_loader=calib_loader,
@@ -317,10 +324,28 @@ def main() -> None:
             collate_fn=collate_fn,
         )
 
+        # Evaluate quantized model against the ONNX baseline
+        print(f"    Evaluating on validation set ...")
+        metrics = evaluate_quantization_loss(
+            quant_graph=quant_graph,
+            onnx_path=str(onnx_path),
+            val_ds=val_ds,
+            device="cpu",
+        )
+        metrics["trial_number"] = tn
+        results.append(metrics)
+
         print(f"    Done.")
         print()
 
-    print("All selected models quantized.")
+    # ---- Write results.json ------------------------------------------------
+    import json as _json
+    results_path = experiments_dir / "results.json"
+    with open(results_path, "w") as f:
+        _json.dump(results, f, indent=2)
+    print(f"Results written to {results_path}")
+
+    print("All selected models quantized and evaluated.")
 
 
 if __name__ == "__main__":

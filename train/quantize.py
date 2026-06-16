@@ -326,6 +326,20 @@ def evaluate_quantization_loss(
     print("  └──────────────────────────────────────────────────┘")
     print()
 
+    return {
+        "float_accuracy": float(round(float_acc, 2)),
+        "quantized_accuracy": float(round(quant_acc, 2)),
+        "accuracy_drop": float(round(acc_drop, 2)),
+        "prediction_agreement": float(round(agreement, 2)),
+        "prob_mse": float(prob_mse),
+        "prob_mae": float(prob_mae),
+        "prob_max_err": float(prob_max_err),
+        "kl_mean": float(kl_mean),
+        "kl_max": float(kl_max),
+        "mean_conf_drop": float(round(mean_conf_drop, 2)),
+        "per_class_mse": [float(m) for m in per_class_mse],
+    }
+
 
 # ---------------------------------------------------------------------------
 # Model size reporting
