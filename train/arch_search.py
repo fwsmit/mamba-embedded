@@ -288,11 +288,11 @@ def run_optimization(_):
     )
     study.optimize(
         objective,
-        callbacks=[optuna.MaxTrialsCallback(100, states=(optuna.TrialState.COMPLETE))]
+        callbacks=[optuna.study.MaxTrialsCallback(100, states=(optuna.trial.TrialState.COMPLETE))]
     )
 
 
-@hydra_main(config_path="../config", config_name="arch-mamba1-kws", version_base=None)
+@hydra_main(config_path="../config", config_name="arch-mamba1-kws-bidir-mul", version_base=None)
 def main(cfg: DictConfig):
     global BATCHSIZE, EPOCHS, MODEL, DATASET, EXPERIMENT_NAME
     global BIDIRECTIONAL, BIDIRECTIONAL_STRATEGY
