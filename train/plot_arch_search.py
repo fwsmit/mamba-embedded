@@ -1,9 +1,10 @@
 """
-HPO Comparison: compare two Optuna studies from their Hydra config files.
-Pareto front and supporting analysis plots for two Optuna multi-objective studies.
+HPO Comparison: compare multiple Optuna studies from their Hydra config files.
+Pareto front and supporting analysis plots for N multi-objective studies.
 
 Usage:
   python plot_arch_search.py config/arch-mamba1-kws.yaml config/arch-mamba1-kws-multi.yaml
+  python plot_arch_search.py config/a.yaml config/b.yaml config/c.yaml config/d.yaml
 """
 
 import argparse
@@ -33,18 +34,23 @@ def fig_path(name):
 
 # ── Config (defaults, overridden by command-line args) ───────────────────────
 DB_URL       = "sqlite:///mamba_hpo.db"
-STUDY_A      = "mamba-1-kws-1"
-STUDY_B      = "mamba-1-kws-2"
 
-COLOR_A      = "#4C9BE8"   # blue  – first study
-COLOR_B      = "#E8834C"   # orange – second study
-PARETO_A     = "#1A5FA8"
-PARETO_B     = "#A84F1A"
+# Colour palette for up to N studies (base, pareto)
+COLORS = [
+    ("#4C9BE8", "#1A5FA8"),   # blue
+    ("#E8834C", "#A84F1A"),   # orange
+    ("#4CAF50", "#2E7D32"),   # green
+    ("#9C27B0", "#6A1B9A"),   # purple
+    ("#009688", "#00695C"),   # teal
+    ("#E91E63", "#AD1457"),   # pink
+]
+
 ALPHA_ALL    = 0.25
 ALPHA_PARETO = 0.95
 MARKER_ALL   = "o"
 MARKER_PAR   = "D"
 FIG_DPI      = 150
+
 
 # ── Load studies ──────────────────────────────────────────────────────────────
 def load_study(name):
@@ -84,53 +90,65 @@ def pareto_mask(df):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Figure 1 – Pareto Front Comparison  (main money plot)
 # ═══════════════════════════════════════════════════════════════════════════════
-def create_pareto_front_plot(df_a, df_b, par_a, par_b):
-    """Plot and save the Pareto front comparison figure."""
+def create_pareto_front_plot(studies_data):
+    """
+    Plot and save the Pareto front comparison figure for N studies.
+
+    Parameters
+    ----------
+    studies_data : list of dict
+        Each dict has keys: 'name', 'df', 'par' (Pareto-sorted DataFrame),
+        'color' (base), 'color_par' (Pareto highlight), 'idx' (int).
+    """
+    n_studies = len(studies_data)
+
     fig1, ax = plt.subplots(figsize=(9, 6))
 
-    # All trials (faint)
-    ax.scatter(df_a["latency"], df_a["accuracy"],
-               color=COLOR_A, alpha=ALPHA_ALL, s=22, marker=MARKER_ALL, zorder=2)
-    ax.scatter(df_b["latency"], df_b["accuracy"],
-               color=COLOR_B, alpha=ALPHA_ALL, s=22, marker=MARKER_ALL, zorder=2)
+    # ── All trials (faint) ────────────────────────────────────────────────────
+    for sd in studies_data:
+        ax.scatter(sd["df"]["latency"], sd["df"]["accuracy"],
+                   color=sd["color"], alpha=ALPHA_ALL, s=22, marker=MARKER_ALL,
+                   zorder=2)
 
-    # Pareto-optimal points
-    ax.scatter(par_a["latency"], par_a["accuracy"],
-               color=PARETO_A, alpha=ALPHA_PARETO, s=70, marker=MARKER_PAR,
-               edgecolors="white", linewidths=0.6, zorder=4, label=f"{STUDY_A} Pareto")
-    ax.scatter(par_b["latency"], par_b["accuracy"],
-               color=PARETO_B, alpha=ALPHA_PARETO, s=70, marker=MARKER_PAR,
-               edgecolors="white", linewidths=0.6, zorder=4, label=f"{STUDY_B} Pareto")
+    # ── Pareto-optimal points and step-lines ──────────────────────────────────
+    for sd in studies_data:
+        ax.scatter(sd["par"]["latency"], sd["par"]["accuracy"],
+                   color=sd["color_par"], alpha=ALPHA_PARETO, s=70,
+                   marker=MARKER_PAR, edgecolors="white", linewidths=0.6,
+                   zorder=4, label=f"{sd['name']} Pareto")
+        ax.step(sd["par"]["latency"], sd["par"]["accuracy"],
+                color=sd["color_par"], linewidth=1.8, where="post", zorder=3)
 
-    # Pareto step-lines (staircase front)
-    ax.step(par_a["latency"], par_a["accuracy"],
-            color=PARETO_A, linewidth=1.8, where="post", zorder=3)
-    ax.step(par_b["latency"], par_b["accuracy"],
-            color=PARETO_B, linewidth=1.8, where="post", zorder=3)
-
-    # ax.yaxis.set_major_locator(ticker.LinearLocator(11))
     ax.set_yticks(np.arange(0, 1.1, 0.1))
 
-    # Legend with all-trials proxy
-    legend_elements = [
-        Line2D([0], [0], marker=MARKER_PAR, color="w", markerfacecolor=PARETO_A,
-               markersize=9, label=f"{STUDY_A} — Pareto front"),
-        Line2D([0], [0], marker=MARKER_PAR, color="w", markerfacecolor=PARETO_B,
-               markersize=9, label=f"{STUDY_B} — Pareto front"),
-        Line2D([0], [0], marker=MARKER_ALL, color="w", markerfacecolor=COLOR_A,
-               markersize=7, alpha=0.7, label=f"{STUDY_A} — all trials"),
-        Line2D([0], [0], marker=MARKER_ALL, color="w", markerfacecolor=COLOR_B,
-               markersize=7, alpha=0.7, label=f"{STUDY_B} — all trials"),
-    ]
+    # ── Build legend ──────────────────────────────────────────────────────────
+    legend_elements = []
+    for sd in studies_data:
+        legend_elements.append(
+            Line2D([0], [0], marker=MARKER_PAR, color="w",
+                   markerfacecolor=sd["color_par"], markersize=9,
+                   label=f"{sd['name']} — Pareto front")
+        )
+        legend_elements.append(
+            Line2D([0], [0], marker=MARKER_ALL, color="w",
+                   markerfacecolor=sd["color"], markersize=7, alpha=0.7,
+                   label=f"{sd['name']} — all trials")
+        )
+
     ax.legend(handles=legend_elements, framealpha=0.9, fontsize=9)
 
     ax.set_xlabel("Latency on pc (us, lower is better)", fontsize=11)
     ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
-    ax.set_title("Hyperparameter optimization: first vs second study", fontsize=13, fontweight="bold")
+
+    n_studies = len(studies_data)
+    title_suffix = " vs ".join(sd["name"] for sd in studies_data)
+    ax.set_title(f"HPO Pareto front comparison: {title_suffix}",
+                 fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
     fig1.tight_layout()
     fig1.savefig(fig_path("fig1_pareto_front.png"), dpi=FIG_DPI)
-    print("Saved figures/fig1_pareto_front.png")
+    fig1.savefig(fig_path("fig1_pareto_front.pdf"))
+    print("Saved figures/fig1_pareto_front.png and fig1_pareto_front.pdf")
 
 
 def study_name_from_config(config_path: str) -> str:
@@ -141,41 +159,50 @@ def study_name_from_config(config_path: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare two Optuna studies from their Hydra config files"
+        description="Compare multiple Optuna studies from their Hydra config files"
     )
-    parser.add_argument("config_a", help="Path to the first Hydra config YAML")
-    parser.add_argument("config_b", help="Path to the second Hydra config YAML")
+    parser.add_argument(
+        "configs", nargs="+",
+        help="Paths to Hydra config YAML files (at least 1, up to any number)"
+    )
     args = parser.parse_args()
 
-    global STUDY_A, STUDY_B
-    STUDY_A = study_name_from_config(args.config_a)
-    STUDY_B = study_name_from_config(args.config_b)
-    print(f"Study A: {STUDY_A}  (from {args.config_a})")
-    print(f"Study B: {STUDY_B}  (from {args.config_b})")
+    n = len(args.configs)
+    if n == 0:
+        parser.error("At least one config path is required.")
 
-    # ── Load ──────────────────────────────────────────────────────────────────────
-    print("Loading studies …")
-    study_a = load_study(STUDY_A)
-    study_b = load_study(STUDY_B)
+    if n > len(COLORS):
+        print(f"Warning: {n} studies provided but only {len(COLORS)} colours defined. "
+              f"Colours will be recycled from the beginning.")
 
-    df_a = trials_df(study_a)
-    df_b = trials_df(study_b)
+    # ── Gather study data ─────────────────────────────────────────────────────
+    studies_data = []
+    for i, config_path in enumerate(args.configs):
+        name = study_name_from_config(config_path)
+        color_base, color_par = COLORS[i % len(COLORS)]
+        print(f"Study {i+1}: {name}  (from {config_path})  → colour {color_base}")
 
-    mask_a = pareto_mask(df_a)
-    mask_b = pareto_mask(df_b)
+        print("  Loading study …")
+        study = load_study(name)
+        df = trials_df(study)
+        mask = pareto_mask(df)
 
-    print(f"  {STUDY_A}: {len(df_a)} trials, {mask_a.sum()} Pareto-optimal")
-    print(f"  {STUDY_B}: {len(df_b)} trials, {mask_b.sum()} Pareto-optimal")
+        # Sort Pareto front by latency for clean step-line drawing
+        par = df[mask].copy().sort_values("latency")
 
-    # Sort Pareto fronts by latency for clean line drawing
-    def pareto_sorted(df, mask):
-        p = df[mask].copy()
-        return p.sort_values("latency")
+        print(f"  {name}: {len(df)} trials, {len(par)} Pareto-optimal")
 
-    par_a = pareto_sorted(df_a, mask_a)
-    par_b = pareto_sorted(df_b, mask_b)
+        studies_data.append({
+            "name": name,
+            "df": df,
+            "par": par,
+            "color": color_base,
+            "color_par": color_par,
+            "idx": i,
+        })
 
-    create_pareto_front_plot(df_a, df_b, par_a, par_b)
+    # ── Plot ──────────────────────────────────────────────────────────────────
+    create_pareto_front_plot(studies_data)
 
     print("\nAll figures saved. Done.")
     plt.show()
