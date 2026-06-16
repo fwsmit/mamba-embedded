@@ -43,6 +43,38 @@ python -m train.quantize --model mamba-1 --dataset har
 
 Set `MODEL` (e.g., `mamba-1`, `mamba-3`) and `DATASET` (e.g., `har`, `kws`) as environment variables.
 
+## Architecture Search
+
+Run an Optuna-based hyperparameter search with a pre-defined configuration:
+
+```bash
+conda activate torch-pascal
+python -m train.arch_search --config config/arch-mamba1-kws.yaml
+```
+
+The `--config` flag is **required** and selects which configuration file to use. Available configs in `config/`:
+
+| Config file | Model | Dataset | Multi-layer |
+|---|---|---|---|
+| `arch-mamba1-kws.yaml` | mamba-1 | kws | no |
+| `arch-mamba1-har.yaml` | mamba-1 | har | no |
+| `arch-mamba3-kws.yaml` | mamba-3 | kws | no |
+| `arch-mamba3-har.yaml` | mamba-3 | har | no |
+| `arch-mamba1-kws-multi.yaml` | mamba-1 | kws | yes |
+
+To add a new search configuration, create a new YAML file in `config/` with these fields:
+
+```yaml
+BATCHSIZE: 128
+EPOCHS: 2
+MODEL: mamba-1          # "mamba-1" or "mamba-3"
+DATASET: kws            # "kws" or "har"
+MULTI_LAYER: false      # search over number of layers
+EXPERIMENT_NAME: "v2"   # distinguishes this experiment in the Optuna study name
+```
+
+Results are stored in an Optuna SQLite database (`mamba_hpo.db`) and ONNX files in `~/Models/<MODEL>-<DATASET>-<EXPERIMENT_NAME>/`.
+
 ## Model Pipeline
 
 1. **Train** → exports `~/Models/<model>.onnx`

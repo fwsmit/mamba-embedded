@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -267,10 +268,15 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
     onnx_dir = Path.home() / "Models" / args.study_name
 
+    # Copy ONNX models to experiments/STUDY_NAME/ so originals are never modified
+    experiments_dir = repo_root / "experiments" / args.study_name
+    experiments_dir.mkdir(parents=True, exist_ok=True)
+
     n_calib_samples = CALIB_STEPS * CALIB_BATCH
 
     print(f"  Dataset          : {dataset}")
     print(f"  ONNX directory   : {onnx_dir}")
+    print(f"  Experiments dir  : {experiments_dir}")
     print(f"  Calibration steps: {CALIB_STEPS}")
     print()
 
@@ -281,16 +287,21 @@ def main() -> None:
     print()
 
     for tn in selected_trials:
-        onnx_path = onnx_dir / f"{args.study_name}-trial-{tn}.onnx"
-        if not onnx_path.exists():
-            print(f"  WARNING: ONNX file not found, skipping trial #{tn}: {onnx_path}")
+        src_onnx = onnx_dir / f"{args.study_name}-trial-{tn}.onnx"
+        if not src_onnx.exists():
+            print(f"  WARNING: ONNX file not found, skipping trial #{tn}: {src_onnx}")
             continue
+
+        # Copy to experiments dir so original is never modified
+        onnx_path = experiments_dir / src_onnx.name
+        shutil.copy2(src_onnx, onnx_path)
 
         espdl_path = onnx_path.with_suffix(".espdl")
 
         input_shape = infer_input_shape(onnx_path)
 
-        print(f"  Trial #{tn}: {onnx_path.name}")
+        print(f"  Trial #{tn}: {src_onnx.name}")
+        print(f"    Copy        : {onnx_path}")
         print(f"    Input shape : {input_shape}")
         print(f"    Output      : {espdl_path}")
 

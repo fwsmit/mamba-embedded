@@ -1,5 +1,6 @@
 import os
-import hydra
+import argparse
+import yaml
 
 import numpy as np
 import onnxruntime as ort
@@ -282,16 +283,30 @@ def run_optimization(_):
     )
 
 
-@hydra.main(config_path="../config", config_name="config", version_base=None)
-def main(cfg):
+def main():
+    parser = argparse.ArgumentParser(description="Mamba architecture search via Optuna")
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Configuration file for the architecture search (e.g. config/arch-mamba1-kws.yaml)",
+    )
+    args = parser.parse_args()
+
+    config_path = os.path.join(os.path.dirname(__file__), "..", args.config)
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
+    print(f"Loaded configuration from {args.config}")
+
     global BATCHSIZE, EPOCHS, MODEL, DATASET, MULTI_LAYER, EXPERIMENT_NAME
     global STUDY_NAME, ONNX_DIR, N_WORKERS
-    BATCHSIZE = cfg.BATCHSIZE
-    EPOCHS = cfg.EPOCHS
-    MODEL = cfg.MODEL
-    DATASET = cfg.DATASET
-    MULTI_LAYER = cfg.MULTI_LAYER
-    EXPERIMENT_NAME = cfg.EXPERIMENT_NAME
+    BATCHSIZE = cfg["BATCHSIZE"]
+    EPOCHS = cfg["EPOCHS"]
+    MODEL = cfg["MODEL"]
+    DATASET = cfg["DATASET"]
+    MULTI_LAYER = cfg["MULTI_LAYER"]
+    EXPERIMENT_NAME = cfg["EXPERIMENT_NAME"]
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
     N_WORKERS = 1 if MODEL == "mamba-1" else 3
