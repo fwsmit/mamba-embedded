@@ -11,6 +11,7 @@ Usage:
 
 import argparse
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -362,6 +363,42 @@ def main() -> None:
     print(f"Results written to {results_path}")
 
     print("All selected models quantized and evaluated.")
+
+    # ---- Deploy each quantized model to ESP32-S3 ---------------------------
+    print()
+    print("=" * 62)
+    print("  DEPLOYING TO ESP32-S3")
+    print("=" * 62)
+    print()
+
+    build_script = repo_root / "build-esp-dl.sh"
+    espdl_target = repo_root / "esp-dl" / "main" / "model" / "model.espdl"
+
+    for tn in selected_trials:
+        src_espdl = experiments_dir / f"{args.study_name}-trial-{tn}.espdl"
+        if not src_espdl.exists():
+            print(f"  WARNING: .espdl file not found, skipping trial #{tn}: {src_espdl}")
+            continue
+
+        print(f"  Trial #{tn}: {src_espdl.name}")
+        print(f"    Copying to {espdl_target} ...")
+        shutil.copy2(src_espdl, espdl_target)
+
+        print(f"    Running build-esp-dl.sh ...")
+        result = subprocess.run(
+            [str(build_script)],
+            capture_output=True,
+            text=True,
+            cwd=repo_root,
+        )
+        print(f"    Exit code: {result.returncode}")
+        if result.stdout:
+            print(f"    stdout:\n{result.stdout}")
+        if result.stderr:
+            print(f"    stderr:\n{result.stderr}")
+        print()
+
+    print("All selected models deployed.")
 
 
 if __name__ == "__main__":
