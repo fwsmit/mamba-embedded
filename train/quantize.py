@@ -388,7 +388,7 @@ def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
 
     graph_overhead = onnx_size - param_size
 
-    rel = onnx_path.relative_to(repo_root)
+    rel = onnx_path.relative_to(repo_root) if onnx_path.is_relative_to(repo_root) else onnx_path
     print(f"  │  ONNX model ({rel})        │")
     print(f"  │    Total      : {onnx_size / 1024:>8.1f} KB              │")
     print(f"  │    Parameters : {param_size / 1024:>8.1f} KB              │")
