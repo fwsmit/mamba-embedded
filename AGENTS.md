@@ -49,10 +49,10 @@ Run an Optuna-based hyperparameter search with a pre-defined configuration using
 
 ```bash
 conda activate torch-pascal
-python -m train.arch_search --config-name arch-mamba1-kws
+python -m train.arch_search config/arch-mamba1-kws.yaml
 ```
 
-The `--config-name` flag selects which configuration file to use (the `.yaml` extension is optional). Available configs in `config/`:
+The positional argument is the path to a config YAML file. Available configs in `config/`:
 
 | Config file | Model | Dataset | Multi-layer |
 |---|---|---|---|

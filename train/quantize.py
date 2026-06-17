@@ -13,6 +13,7 @@ import onnx
 import onnxruntime as ort
 from torch.utils.data import DataLoader, TensorDataset
 from esp_ppq.api import espdl_quantize_onnx
+import torch
 from torch.utils.data import Subset
 from .data import load_har_data, load_speechcommands_data
 from code import InteractiveConsole
@@ -159,12 +160,12 @@ def infer_input_shape(onnx_path: Path):
 # ---------------------------------------------------------------------------
 
 
-DEVICE = "cpu"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def collate_fn(batch):
     x, _ = batch
-    return x.to("cpu")
+    return x.to(DEVICE)
 
 
 def load_calibration(
@@ -214,7 +215,7 @@ def evaluate_quantization_loss(
     quant_graph: BaseGraph,
     onnx_path: str,
     val_ds,
-    device: str = "cpu",
+    device: str = DEVICE,
 ):
     """
     Run float and quantized inference on the full validation set and report
@@ -494,7 +495,7 @@ def quantize_onnx_to_espdl(
     input_shape: list[int] | None = None,
     target: str = TARGET,
     num_of_bits: int = NUM_OF_BITS,
-    device: str = "cpu",
+    device: str = DEVICE,
     collate_fn=collate_fn,
 ) -> BaseGraph:
     """

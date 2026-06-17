@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import optuna
+import torch
 from optuna.trial import TrialState
 
 from .quantize import (
@@ -204,6 +205,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     # ---- Load study -------------------------------------------------------
     study = optuna.load_study(
         study_name=args.study_name,
@@ -335,7 +338,7 @@ def main() -> None:
             input_shape=input_shape,
             target=TARGET,
             num_of_bits=NUM_OF_BITS,
-            device="cpu",
+            device=device,
             collate_fn=collate_fn,
         )
 
@@ -345,7 +348,7 @@ def main() -> None:
             quant_graph=quant_graph,
             onnx_path=str(onnx_path),
             val_ds=val_ds,
-            device="cpu",
+            device=device,
         )
         metrics["trial_number"] = tn
         results.append(metrics)
