@@ -119,8 +119,21 @@ def create_pareto_front_plot(studies_data):
         ax.step(sd["par"]["latency"], sd["par"]["accuracy"],
                 color=sd["color_par"], linewidth=1.8, where="post", zorder=3)
 
-    ax.set_ylim(0.85, 1.0)
-    ax.set_yticks(np.arange(0.86, 1.01, 0.02))
+    # ── Frame y-axis around the Pareto front accuracy, capped at 100% ──────
+    all_par_acc = np.concatenate([sd["par"]["accuracy"].values for sd in studies_data])
+    if len(all_par_acc) > 0:
+        lo_acc = all_par_acc.min()
+        total_range = 1.0 - lo_acc
+        if total_range > 0:
+            pad = total_range * 0.2
+        else:
+            pad = 0.01  # fallback when all have perfect accuracy
+        bot = max(0.0, lo_acc - pad)
+        ax.set_ylim(bot, 1.0)
+        tick_start = np.ceil(bot / 0.02) * 0.02
+        ax.set_yticks(np.arange(tick_start, 1.001, 0.02))
+    else:
+        ax.set_yticks(np.arange(0.80, 1.001, 0.02))
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
 
     # ── Build legend ──────────────────────────────────────────────────────────
@@ -138,6 +151,17 @@ def create_pareto_front_plot(studies_data):
         )
 
     ax.legend(handles=legend_elements, framealpha=0.9, fontsize=9)
+
+    # ── Frame x-axis around the Pareto front with padding ────────────────────
+    all_par_lat = np.concatenate([sd["par"]["latency"].values for sd in studies_data])
+    if len(all_par_lat) > 0:
+        lo, hi = all_par_lat.min(), all_par_lat.max()
+        span = hi - lo
+        if span > 0:
+            pad = span * 0.2
+        else:
+            pad = lo * 0.2 if lo > 0 else 10.0
+        ax.set_xlim(lo - pad, hi + pad)
 
     ax.set_xlabel("Latency on pc (us, lower is better)", fontsize=11)
     ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
