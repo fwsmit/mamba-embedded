@@ -1,3 +1,4 @@
+import argparse
 import os
 
 import numpy as np
@@ -14,8 +15,7 @@ import re
 import time
 import pty
 from multiprocessing import Pool, set_start_method
-from hydra import main as hydra_main
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from mamba_ssm import Mamba, Mamba3
 
 from .models import MambaWrapper
@@ -293,7 +293,6 @@ def run_optimization(_):
     )
 
 
-@hydra_main(config_path="../config", config_name="arch-mamba1-kws-bidir-mul", version_base=None)
 def main(cfg: DictConfig):
     global BATCHSIZE, EPOCHS, MODEL, DATASET, EXPERIMENT_NAME
     global BIDIRECTIONAL, BIDIRECTIONAL_STRATEGY
@@ -303,8 +302,8 @@ def main(cfg: DictConfig):
     MODEL = cfg.MODEL
     DATASET = cfg.DATASET
     EXPERIMENT_NAME = cfg.EXPERIMENT_NAME
-    BIDIRECTIONAL = cfg.bidirectional
-    BIDIRECTIONAL_STRATEGY = cfg.bidirectional_strategy
+    BIDIRECTIONAL = cfg.get("bidirectional", False)
+    BIDIRECTIONAL_STRATEGY = cfg.get("bidirectional_strategy", None)
     SEARCH_SPACE = cfg.SEARCH_SPACE
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}" if EXPERIMENT_NAME else f"{MODEL}-{DATASET}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
@@ -362,4 +361,9 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Architecture search for Mamba models on ESP32-S3")
+    parser.add_argument("config", help="Path to config YAML file, e.g. config/arch-mamba1-kws.yaml")
+    args = parser.parse_args()
+
+    cfg = OmegaConf.load(args.config)
+    main(cfg)
