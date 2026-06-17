@@ -4,12 +4,11 @@ hydra:
   output_subdir: null
 
 BATCHSIZE: 128
-EPOCHS: 2
+EPOCHS: 20
 MODEL: mamba-1
-DATASET: kws
-EXPERIMENT_NAME: "bidir-mul"
-bidirectional: true
-bidirectional_strategy: mul
+DATASET: har
+EXPERIMENT_NAME: ""
+bidirectional: false
 
 SEARCH_SPACE:
   d_model:

@@ -7,7 +7,9 @@ BATCHSIZE: 128
 EPOCHS: 2
 MODEL: mamba-1
 DATASET: kws
-EXPERIMENT_NAME: ""
+EXPERIMENT_NAME: "2-bidir"
+bidirectional: true
+bidirectional_strategy: add
 
 SEARCH_SPACE:
   d_model:
