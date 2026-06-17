@@ -288,7 +288,7 @@ def run_optimization(_):
     )
     study.optimize(
         objective,
-        callbacks=[optuna.study.MaxTrialsCallback(100, states=(optuna.trial.TrialState.COMPLETE))]
+        callbacks=[optuna.study.MaxTrialsCallback(178, states=(optuna.trial.TrialState.COMPLETE,))]
     )
 
 
