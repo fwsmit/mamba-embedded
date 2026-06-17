@@ -11,22 +11,23 @@ This project trains **Mamba state-space models (SSMs)** and deploys them on **ES
 | `tools/` | ESP-DL operator compatibility checker |
 | `~/Models/` | Exported ONNX models |
 | `data/` | Datasets (HAR, SpeechCommands) |
-| `build-esp-dl.sh` | Build, flash, and monitor the ESP-DL project |
+| `run-esp.sh` | Copy an .espdl model, build, flash, and monitor the ESP-DL project |
 
 ## Quick Start: Build and Run on ESP32-S3
 
-To build the ESP-DL firmware, flash it to the device over USB, and monitor the serial output:
+To build the ESP-DL firmware with a given quantized model, flash it to the device over USB, and monitor the serial output:
 
 ```bash
-./build-esp-dl.sh
+./run-esp.sh path/to/model.espdl
 ```
 
 This script:
-1. Sources the ESP-IDF v6.0.1 environment
-2. Runs `idf.py build` in `esp-dl/`
-3. Runs `idf.py flash` on `/dev/ttyACM0`
-4. Opens a serial monitor and waits for an inference result
-5. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash
+1. Copies the specified `.espdl` file to `esp-dl/main/model/model.espdl`
+2. Sources the ESP-IDF v6.0.1 environment
+3. Runs `idf.py build` in `esp-dl/`
+4. Runs `idf.py flash` on `/dev/ttyACM0`
+5. Opens a serial monitor and waits for an inference result
+6. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash
 
 ## Training a Model
 
@@ -98,7 +99,7 @@ Results are stored in an Optuna SQLite database (`mamba_hpo.db`) and ONNX files 
 1. **Train** → exports `~/Models/<model>.onnx`
 2. **Check op compatibility** → `python tools/check_espdl_ops.py ~/Models/<model>.onnx`
 3. **Quantize** → generates `.espdl` file placed in `esp-dl/main/model/`
-4. **Build & flash** → `./build-esp-dl.sh`
+4. **Build & flash** → `./run-esp.sh ~/Models/<model>.espdl`
 
 ## Known Issues
 

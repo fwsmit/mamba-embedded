@@ -374,8 +374,7 @@ def main() -> None:
     print("=" * 62)
     print()
 
-    build_script = repo_root / "build-esp-dl.sh"
-    espdl_target = repo_root / "esp-dl" / "main" / "model" / "model.espdl"
+    run_script = repo_root / "run-esp.sh"
 
     for tn in selected_trials:
         src_espdl = experiments_dir / f"{args.study_name}-trial-{tn}.espdl"
@@ -384,12 +383,9 @@ def main() -> None:
             continue
 
         print(f"  Trial #{tn}: {src_espdl.name}")
-        print(f"    Copying to {espdl_target} ...")
-        shutil.copy2(src_espdl, espdl_target)
-
-        print(f"    Running build-esp-dl.sh ...")
+        print(f"    Running run-esp.sh ...")
         result = subprocess.run(
-            [str(build_script)],
+            [str(run_script), str(src_espdl)],
             capture_output=True,
             text=True,
             cwd=repo_root,

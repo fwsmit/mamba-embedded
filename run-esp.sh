@@ -1,6 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <path-to-model.espdl>" >&2
+  exit 1
+fi
+
+MODEL_PATH="$1"
+
+if [ ! -f "$MODEL_PATH" ]; then
+  echo "Error: model file not found: $MODEL_PATH" >&2
+  exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 set +eu
 source ~/.espressif/tools/activate_idf_v6.0.1.sh >/dev/null
@@ -8,6 +20,8 @@ set -eu
 
 IDF_PY="$IDF_PATH/tools/idf.py"
 PYTHON="$IDF_PYTHON_ENV_PATH/bin/python"
+
+cp "$MODEL_PATH" "$SCRIPT_DIR/esp-dl/main/model/model.espdl"
 
 cd "$SCRIPT_DIR/esp-dl"
 
