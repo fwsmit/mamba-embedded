@@ -9,6 +9,7 @@ MODEL: mamba-1
 DATASET: har
 EXPERIMENT_NAME: ""
 bidirectional: false
+n_trials: 100
 
 SEARCH_SPACE:
   d_model:

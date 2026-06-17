@@ -10,6 +10,7 @@ DATASET: kws
 EXPERIMENT_NAME: "2-bidir"
 bidirectional: true
 bidirectional_strategy: add
+n_trials: 100
 
 SEARCH_SPACE:
   d_model:

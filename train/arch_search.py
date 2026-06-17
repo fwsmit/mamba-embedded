@@ -40,6 +40,7 @@ BIDIRECTIONAL_STRATEGY = None
 STUDY_NAME = None
 ONNX_DIR = None
 N_WORKERS = None
+N_TRIALS = None
 SEARCH_SPACE = None
 
 STORAGE_URL = "sqlite:///mamba_hpo.db"
@@ -288,7 +289,7 @@ def run_optimization(_):
     )
     study.optimize(
         objective,
-        callbacks=[optuna.study.MaxTrialsCallback(178, states=(optuna.trial.TrialState.COMPLETE,))]
+        callbacks=[optuna.study.MaxTrialsCallback(N_TRIALS, states=(optuna.trial.TrialState.COMPLETE,))]
     )
 
 
@@ -296,7 +297,7 @@ def run_optimization(_):
 def main(cfg: DictConfig):
     global BATCHSIZE, EPOCHS, MODEL, DATASET, EXPERIMENT_NAME
     global BIDIRECTIONAL, BIDIRECTIONAL_STRATEGY
-    global STUDY_NAME, ONNX_DIR, N_WORKERS, SEARCH_SPACE
+    global STUDY_NAME, ONNX_DIR, N_WORKERS, N_TRIALS, SEARCH_SPACE
     BATCHSIZE = cfg.BATCHSIZE
     EPOCHS = cfg.EPOCHS
     MODEL = cfg.MODEL
@@ -308,6 +309,7 @@ def main(cfg: DictConfig):
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}" if EXPERIMENT_NAME else f"{MODEL}-{DATASET}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
     N_WORKERS = 1 if MODEL == "mamba-1" else 3
+    N_TRIALS = cfg.N_TRIALS
 
     print(f"Loaded configuration: {cfg}")
 

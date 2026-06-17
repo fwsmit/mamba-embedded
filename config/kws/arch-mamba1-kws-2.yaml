@@ -8,6 +8,7 @@ EPOCHS: 2
 MODEL: mamba-1
 DATASET: kws
 EXPERIMENT_NAME: "2"
+n_trials: 100
 
 SEARCH_SPACE:
   d_model:
