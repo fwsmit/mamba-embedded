@@ -63,12 +63,6 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--device",
-        default="cpu",
-        help="Device for PPQ calibration: 'cpu' or 'cuda' (default: cpu)",
-    )
-
-    parser.add_argument(
         "--skip-loss-report",
         action="store_true",
         help="Skip loading the dataset and reporting quantization loss / model sizes",
@@ -603,7 +597,8 @@ def main():
     print(f"  Output slug: model.espdl")
     print(f"  Target     : {TARGET} ({args.bits}-bit)")
     print(f"  Input shape: {input_shape}")
-    print(f"  Device     : {args.device}")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"  Device     : {device}")
 
     # -----------------------------------------------------------------------
     # Calibration data
@@ -631,7 +626,7 @@ def main():
         input_shape=input_shape,
         target=TARGET,
         num_of_bits=args.bits,
-        device=args.device,
+        device=device,
         collate_fn=collate_fn,
     )
 
@@ -648,7 +643,7 @@ def main():
             quant_graph=quant_graph,
             onnx_path=str(onnx_path),
             val_ds=val_ds,
-            device=args.device,
+            device=device,
         )
     else:
         print("\n[3/4] Skipping quantization loss evaluation (--skip-loss-report)")
