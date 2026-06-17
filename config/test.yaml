@@ -1,0 +1,29 @@
+hydra:
+  job:
+    chdir: false
+  output_subdir: null
+
+BATCHSIZE: 128
+EPOCHS: 5
+MODEL: mamba-1
+DATASET: har
+EXPERIMENT_NAME: "test"
+bidirectional: false
+n_trials: 5
+
+SEARCH_SPACE:
+  d_model:
+    low: 8
+    high: 32
+  d_state:
+    low: 8
+    high: 16
+  d_conv:
+    low: 2
+    high: 4
+  expand:
+    low: 1
+    high: 4
+  n_layers:
+    low: 1
+    high: 1
