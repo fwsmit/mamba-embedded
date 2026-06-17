@@ -119,7 +119,9 @@ def create_pareto_front_plot(studies_data):
         ax.step(sd["par"]["latency"], sd["par"]["accuracy"],
                 color=sd["color_par"], linewidth=1.8, where="post", zorder=3)
 
-    ax.set_yticks(np.arange(0, 1.1, 0.1))
+    ax.set_ylim(0.85, 1.0)
+    ax.set_yticks(np.arange(0.86, 1.01, 0.02))
+    ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
 
     # ── Build legend ──────────────────────────────────────────────────────────
     legend_elements = []
