@@ -61,5 +61,6 @@ class MambaWrapper(nn.Module):
                     out = out * out_rev
             x = self.dropout(out)
             x = res + x
-        x = self.norm_out(x[:, -1, :])
+        x = self.norm_out(x)
+        x = x.mean(dim=1)           # [B, H]
         return self.classifier(x)
