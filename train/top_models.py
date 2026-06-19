@@ -395,6 +395,14 @@ def main() -> None:
             print(f"    stdout:\n{result.stdout}")
         if result.stderr:
             print(f"    stderr:\n{result.stderr}")
+
+        # Store output alongside the .espdl file
+        output_path = src_espdl.with_suffix(".output")
+        with open(output_path, "w") as f:
+            f.write(f"Exit code: {result.returncode}\n")
+            f.write(f"stdout:\n{result.stdout}")
+            f.write(f"stderr:\n{result.stderr}")
+        print(f"    Output saved: {output_path}")
         print()
 
     print("All selected models deployed.")

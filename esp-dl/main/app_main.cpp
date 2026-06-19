@@ -24,33 +24,6 @@ extern "C" void app_main(void) {
   ESP_LOGI(TAG, "Starting HAR inference");
 
   //
-  // HAR input:
-  // Shape = [1, 10, 57]
-  // Total = 570 floats
-  //
-  constexpr int SEQ_LEN = 10;
-  constexpr int FEATURE_DIM = 57;
-  constexpr int INPUT_SIZE = SEQ_LEN * FEATURE_DIM;
-
-  //
-  // Create zero-filled input tensor
-  //
-  std::vector<float> input_data(INPUT_SIZE, 0.0f);
-
-  //
-  // Create ESP-DL tensor shape
-  //
-  std::vector<int> input_shape = {1, SEQ_LEN, FEATURE_DIM};
-
-  //
-  // Create input tensor
-  //
-  // Constructor signature: TensorBase(shape, data, exponent, dtype)
-  // exponent = 0 is the identity scale factor for float32
-  dl::TensorBase *input = new dl::TensorBase(input_shape, input_data.data(), 0,
-                                             dl::DATA_TYPE_FLOAT);
-
-  //
   // Load model from embedded binary
   //
   auto *model =
@@ -59,13 +32,24 @@ extern "C" void app_main(void) {
 
   ESP_LOGI(TAG, "Model loaded");
 
-  ESP_ERROR_CHECK(model->test());
+  esp_err_t test_err = model->test();
+  if (test_err != ESP_OK) {
+    ESP_LOGW(TAG, "Model test failed with error 0x%x: %s", test_err, esp_err_to_name(test_err));
+  }
 
   ESP_LOGI(TAG, "Model tested");
-  // Run inference — single-tensor overload; outputs retrieved via get_outputs()
+
   //
+  // Load the baked-in test input and assign it to the model's input tensor
+  //
+  model->get_fbs_model()->load_map();
+  std::map<std::string, dl::TensorBase *> &graph_inputs = model->get_inputs();
+  std::string input_name = graph_inputs.begin()->first;
+  dl::TensorBase *test_input = model->get_fbs_model()->get_test_input_tensor(input_name);
+  graph_inputs.begin()->second->assign(test_input);
+
   int64_t t_start = esp_timer_get_time();
-  model->run(input);
+  model->run();
   int64_t t_end = esp_timer_get_time();
   int64_t elapsed_us = t_end - t_start;
 
@@ -81,8 +65,9 @@ extern "C" void app_main(void) {
 
   if (output_map.empty()) {
     ESP_LOGE(TAG, "No output tensors");
+    delete test_input;
+    model->get_fbs_model()->clear_map();
     delete model;
-    delete input;
     return;
   }
 
@@ -114,8 +99,9 @@ extern "C" void app_main(void) {
     }
   } else {
     ESP_LOGE(TAG, "Unsupported output dtype");
+    delete test_input;
+    model->get_fbs_model()->clear_map();
     delete model;
-    delete input;
     return;
   }
 
@@ -228,9 +214,9 @@ extern "C" void app_main(void) {
   //
   // Cleanup
   //
-  // Output tensors are owned by the model; do not delete them manually.
+  delete test_input;
+  model->get_fbs_model()->clear_map();
   delete model;
-  delete input;
 
   ESP_LOGI(TAG, "Finished");
   ESP_LOGI(TAG, "INFERENCE_OK");
