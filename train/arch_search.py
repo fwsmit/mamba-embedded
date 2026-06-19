@@ -366,8 +366,9 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Architecture search for Mamba models on ESP32-S3")
-    parser.add_argument("config", help="Path to config YAML file, e.g. config/arch-mamba1-kws.yaml")
+    parser.add_argument("config", nargs="+", help="Path to one or more config YAML files, e.g. config/arch-mamba1-kws.yaml")
     args = parser.parse_args()
 
-    cfg = OmegaConf.load(args.config)
-    main(cfg)
+    for config_path in args.config:
+        cfg = OmegaConf.load(config_path)
+        main(cfg)
