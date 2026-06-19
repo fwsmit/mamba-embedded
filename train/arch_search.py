@@ -287,6 +287,10 @@ def run_optimization(_):
         storage=STORAGE_URL,
         sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
     )
+    completed = study.get_trials(deepcopy=False, states=(optuna.trial.TrialState.COMPLETE,))
+    if len(completed) >= N_TRIALS:
+        print(f"[worker] Study already has {len(completed)} completed trials (max {N_TRIALS}), skipping.")
+        return
     study.optimize(
         objective,
         callbacks=[optuna.study.MaxTrialsCallback(N_TRIALS, states=(optuna.trial.TrialState.COMPLETE,))]
