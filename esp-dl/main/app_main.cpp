@@ -53,10 +53,14 @@ static dl::TensorBase *load_test_input(dl::Model *model) {
 // Inference
 // ---------------------------------------------------------------------------
 
-static int64_t run_and_time(dl::Model *model) {
-    int64_t t_start = esp_timer_get_time();
-    model->run();
-    return esp_timer_get_time() - t_start;
+static float run_and_time(dl::Model *model, int num_runs) {
+    int64_t total_us = 0;
+    for (int i = 0; i < num_runs; ++i) {
+        int64_t t_start = esp_timer_get_time();
+        model->run();
+        total_us += esp_timer_get_time() - t_start;
+    }
+    return (float)total_us / (float)num_runs;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,10 +226,10 @@ extern "C" void app_main(void) {
     //
     // Run inference
     //
-    int64_t elapsed_us = run_and_time(model);
+    float avg_us = run_and_time(model, 10);
 
-    ESP_LOGI(TAG, "Inference completed in %lld us (%.2f ms)",
-             elapsed_us, elapsed_us / 1000.0f);
+    ESP_LOGI(TAG, "Average inference over 10 runs: %.1f us (%.3f ms)",
+             avg_us, avg_us / 1000.0f);
 
     //
     // Read output tensor
