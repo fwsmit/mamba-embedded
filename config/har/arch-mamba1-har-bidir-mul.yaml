@@ -10,7 +10,7 @@ DATASET: har
 EXPERIMENT_NAME: "bidir-mul"
 bidirectional: true
 bidirectional_strategy: ew_multiply
-n_trials: 100
+n_trials: 149
 
 SEARCH_SPACE:
   d_model:

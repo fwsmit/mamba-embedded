@@ -10,7 +10,7 @@ DATASET: har
 EXPERIMENT_NAME: "bidir"
 bidirectional: true
 bidirectional_strategy: add
-n_trials: 100
+n_trials: 149
 
 SEARCH_SPACE:
   d_model:
