@@ -163,6 +163,23 @@ def create_pareto_front_plot(studies_data):
             pad = lo * 0.2 if lo > 0 else 10.0
         ax.set_xlim(lo - pad, hi + pad)
 
+    # ── Extend each Pareto-front step line out to the right and bottom ────────
+    for sd in studies_data:
+        if len(sd["par"]) == 0:
+            continue
+        first_x = sd["par"]["latency"].iloc[0]   # leftmost (lowest-latency) Pareto point
+        first_y = sd["par"]["accuracy"].iloc[0]  # highest accuracy
+        last_x  = sd["par"]["latency"].iloc[-1]  # rightmost (highest-latency) Pareto point
+        last_y  = sd["par"]["accuracy"].iloc[-1] # lowest accuracy
+        x_right = ax.get_xlim()[1]
+        y_bottom = ax.get_ylim()[0]
+        # horizontal extension to the right edge of the plot (from the rightmost point)
+        ax.plot([last_x, x_right], [last_y, last_y],
+                color=sd["color_par"], linewidth=1.8, zorder=3)
+        # vertical extension down to the bottom edge (from the leftmost point)
+        ax.plot([first_x, first_x], [first_y, y_bottom],
+                color=sd["color_par"], linewidth=1.8, zorder=3)
+
     ax.set_xlabel("Latency on pc (us, lower is better)", fontsize=11)
     ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
 
