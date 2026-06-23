@@ -34,3 +34,19 @@ src/data/test_tensor*.rs
 /figures/
 mamba_hpo.db
 experiments/
+
+# Files created by pi
+.bash_profile
+.bashrc
+.claude/
+.gitconfig
+.gitmodules
+.idea
+.mcp.json
+.pi/
+.profile
+.ripgreprc
+.vscode
+.zprofile
+.zshrc
+home/
