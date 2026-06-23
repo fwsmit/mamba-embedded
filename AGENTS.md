@@ -104,7 +104,7 @@ Results are stored in an Optuna SQLite database (`mamba_hpo.db`) and ONNX files 
 
 ## Dataset Partition
 
-A `dataset` partition (type `data`, subtype `undefined`, 2 MB at offset `0x7e0000`) is defined in `partitions.csv` for storing a dataset binary on the ESP32-S3 flash.
+A `dataset` partition (type `data`, subtype `undefined`, 9 MB at offset `0x210000`) is defined in `partitions.csv` for storing a dataset binary on the ESP32-S3 flash.
 
 The dataset partition is integrated into the ESP-IDF build system: if `dataset.bin` exists in `esp-dl/main/model/`, the CMake build automatically registers it as a flash image for the `dataset` partition. This means `idf.py flash` handles everything in one step.
 
