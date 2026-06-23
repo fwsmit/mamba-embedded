@@ -19,6 +19,14 @@ from .data import load_har_data, load_speechcommands_data
 from code import InteractiveConsole
 
 from esp_ppq.executor import TorchExecutor
+from esp_ppq.IR import QuantableOperation
+from esp_ppq.core import (
+    QuantizationPolicy,
+    QuantizationProperty,
+    QuantizationStates,
+    TensorQuantizationConfig,
+)
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -550,6 +558,188 @@ def quantize_onnx_to_espdl(
 
 
 # ---------------------------------------------------------------------------
+# Input quantization inspection
+# ---------------------------------------------------------------------------
+
+
+def get_input_quantization(
+    graph: BaseGraph,
+) -> dict[str, TensorQuantizationConfig]:
+    """
+    Extract the input quantization configuration from a quantized BaseGraph.
+
+    Returns a dict mapping each graph-level input variable name to its
+    ``TensorQuantizationConfig``, which describes how that tensor was quantized
+    (scale, offset, bit-width, min/max, policy).
+
+    Parameters
+    ----------
+    graph : BaseGraph
+        The quantized graph returned by ``espdl_quantize_onnx``
+        (or ``quantize_onnx_to_espdl``).
+
+    Returns
+    -------
+    dict[str, TensorQuantizationConfig]
+        A dictionary of {input_variable_name: TensorQuantizationConfig}.
+        If no quantized input is found (e.g., the first op is not quantized),
+        the value is ``None``.
+    """
+    result: dict[str, TensorQuantizationConfig] = {}
+
+    for var_name, var in graph.inputs.items():
+        tqc = None
+
+        for dest_op in var.dest_ops:
+            if not isinstance(dest_op, QuantableOperation):
+                continue
+
+            # Find which input slot this variable occupies
+            try:
+                idx = dest_op.inputs.index(var)
+            except ValueError:
+                # Variable not found in this op's inputs — skip
+                continue
+
+            tqc = dest_op.config.input_quantization_config[idx]
+            break
+
+        result[var_name] = tqc
+
+    return result
+
+
+def format_tqc(name: str, tqc: TensorQuantizationConfig | None) -> str:
+    if tqc is None:
+        return f"{name}: not quantized (FP32)"
+
+    def _fmt_tensor(t) -> str:
+        if t is None:
+            return "None"
+        if isinstance(t, torch.Tensor):
+            if t.numel() == 1:
+                return f"{t.item():.6g}"
+            return f"[{', '.join(f'{v:.6g}' for v in t.flatten().tolist())}]"
+        return str(t)
+
+    state_name = tqc.state.name if isinstance(tqc.state, QuantizationStates) else str(tqc.state)
+    policy_str = str(tqc.policy).replace("QuantizationProperty.", "")
+
+    lines = [
+        f"{name}:",
+        f"  state      : {state_name}",
+        f"  bits       : {tqc.num_of_bits}",
+        f"  scale      : {_fmt_tensor(tqc.scale)}",
+        f"  offset     : {_fmt_tensor(tqc.offset)}",
+        f"  quant_min  : {tqc.quant_min}",
+        f"  quant_max  : {tqc.quant_max}",
+        f"  policy     : {policy_str}",
+    ]
+    return "\n".join(lines)
+
+
+def print_input_quant_configs(configs: dict[str, TensorQuantizationConfig | None]) -> None:
+    for name, tqc in configs.items():
+        print(format_tqc(name, tqc))
+        print()
+
+
+# ---------------------------------------------------------------------------
+# Dataset quantization to binary file
+# ---------------------------------------------------------------------------
+
+
+def quantize_dataset_to_bin(
+    configs: dict[str, TensorQuantizationConfig | None],
+    dataset,
+    output_path: str | Path,
+) -> None:
+    """
+    Quantize a validation dataset using the input quantization config and write
+    it as a flat binary file for inference on-device.
+
+    The TQC defines the PPQ linear-quantization formula:
+        q = clip(round(x / scale - offset), quant_min, quant_max)
+
+    The binary layout (little-endian) is:
+        [0..4)     uint32  number_of_samples
+        [4..8)     uint32  elements_per_sample
+        [8..)      int8[]  quantized data (flat, row-major, all samples
+                           concatenated)
+
+    Parameters
+    ----------
+    configs : dict[str, TensorQuantizationConfig | None]
+        A dict mapping input variable names to their TQC (typically the output
+        of ``get_input_quantization``). Only the first valid config is used.
+    dataset : Dataset
+        A PyTorch Dataset yielding ``(features, label)`` tuples where
+        ``features`` is a float tensor of shape ``(..., C)``. The quantized
+        output will be flattened.
+    output_path : str or Path
+        Path for the binary output file.
+    """
+    # Find the first valid (non-None) TQC
+    tqc = None
+    for _name, config in configs.items():
+        if config is not None:
+            tqc = config
+            break
+
+    if tqc is None:
+        print("WARNING: No quantized input config found — skipping dataset quantization.")
+        return
+
+    scale = tqc.scale
+    offset = tqc.offset
+    quant_min = tqc.quant_min
+    quant_max = tqc.quant_max
+
+    print(f"  Quantizing {len(dataset)} validation samples with TQC:")
+    print(f"    scale={scale.item() if scale.numel() == 1 else 'per-channel'}, "
+          f"offset={offset.item() if offset.numel() == 1 else 'per-channel'}, "
+          f"bits={tqc.num_of_bits}, range=[{quant_min}, {quant_max}]")
+
+    all_quant = []
+    elements_per_sample = None
+
+    for i, (features, _label) in enumerate(dataset):
+        # features: (seq_len, feat_dim) — add batch dim so shape matches
+        # what the quantizer saw during calibration
+        if features.dim() == 2:
+            x = features.unsqueeze(0)  # (1, seq_len, feat_dim)
+        else:
+            x = features  # already has batch dim
+
+        # PPQ quantisation formula
+        unscaled = x / scale - offset
+        q = torch.clamp(torch.round(unscaled), quant_min, quant_max).to(torch.int8)
+
+        flat = q.flatten()
+        if elements_per_sample is None:
+            elements_per_sample = flat.numel()
+        all_quant.append(flat)
+
+    num_samples = len(all_quant)
+    assert elements_per_sample is not None
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(output_path, "wb") as f:
+        # Number of samples (uint32)
+        f.write(struct.pack("<I", num_samples))
+        # Elements per sample (uint32)
+        f.write(struct.pack("<I", elements_per_sample))
+        # Concatenated quantized data
+        for q in all_quant:
+            f.write(q.numpy().tobytes())
+
+    size_kb = output_path.stat().st_size / 1024
+    print(f"  Wrote {num_samples} samples × {elements_per_sample} int8 values → {output_path} ({size_kb:.1f} KB)")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -630,14 +820,25 @@ def main():
         collate_fn=collate_fn,
     )
 
+    configs = get_input_quantization(quant_graph)
+    print_input_quant_configs(configs)
+
+    # -----------------------------------------------------------------------
+    # Export quantized validation dataset
+    # -----------------------------------------------------------------------
+
+    print("\n[3/4] Exporting quantized validation dataset ...")
+    _, val_ds, _ = load_datasets(dataset)
+
+    dataset_bin_path = out_dir / "dataset.bin"
+    quantize_dataset_to_bin(configs, val_ds, dataset_bin_path)
+
     # -----------------------------------------------------------------------
     # Quantization loss evaluation on full validation set
     # -----------------------------------------------------------------------
 
     if not args.skip_loss_report:
         print("\n[3/4] Evaluating quantization loss on validation set ...")
-
-        _, val_ds, _ = load_datasets(dataset)
 
         evaluate_quantization_loss(
             quant_graph=quant_graph,

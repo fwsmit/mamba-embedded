@@ -23,6 +23,12 @@ PYTHON="$IDF_PYTHON_ENV_PATH/bin/python"
 
 cp "$MODEL_PATH" "$SCRIPT_DIR/esp-dl/main/model/model.espdl"
 
+# Copy dataset.bin from the same directory, if present
+DATASET_SRC="$(dirname "$MODEL_PATH")/dataset.bin"
+if [ -f "$DATASET_SRC" ]; then
+    cp "$DATASET_SRC" "$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
+fi
+
 cd "$SCRIPT_DIR/esp-dl"
 
 # Capture build output; only print on failure
@@ -36,6 +42,15 @@ FLASH_OUT=$("$PYTHON" "$IDF_PY" -p /dev/ttyACM0 flash 2>&1) || {
   echo "$FLASH_OUT" | awk 'length < 300'
   exit 1
 }
+
+# Flash dataset to its partition, if present
+DATASET_BIN="$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
+if [ -f "$DATASET_BIN" ]; then
+    DATASET_OFFSET=0x7e0000
+    "$PYTHON" -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
+        --before default_reset --after no_reset \
+        write_flash "$DATASET_OFFSET" "$DATASET_BIN" 2>&1
+fi
 
 # Monitor serial output — run as a subprocess so stdout stays on bash's pipe
 "$PYTHON" - /dev/ttyACM0 <<'PYEOF'

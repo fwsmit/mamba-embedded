@@ -1,6 +1,7 @@
 #include "dl_model_base.hpp"
 // #include "dl_variable.hpp"
 #include "esp_log.h"
+#include "esp_partition.h"
 #include "esp_timer.h"
 
 #include <algorithm>
@@ -210,8 +211,25 @@ static void cleanup_model(dl::Model *model, dl::TensorBase *test_input) {
 // Entry point
 // ---------------------------------------------------------------------------
 
+static const uint8_t *load_dataset(size_t *out_size) {
+    const esp_partition_t *part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_UNDEFINED, "dataset");
+    if (!part) {
+        ESP_LOGI(TAG, "No dataset partition found");
+        *out_size = 0;
+        return nullptr;
+    }
+    *out_size = part->size;
+    ESP_LOGI(TAG, "Dataset partition found at 0x%x, size %lu bytes",
+             part->address, (unsigned long)part->size);
+    return nullptr; // caller mmap/read as needed
+}
+
 extern "C" void app_main(void) {
     ESP_LOGI(TAG, "Starting HAR inference");
+
+    size_t ds_size = 0;
+    load_dataset(&ds_size);
 
     //
     // Load model from embedded binary

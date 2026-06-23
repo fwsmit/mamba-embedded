@@ -23,11 +23,13 @@ To build the ESP-DL firmware with a given quantized model, flash it to the devic
 
 This script:
 1. Copies the specified `.espdl` file to `esp-dl/main/model/model.espdl`
-2. Sources the ESP-IDF v6.0.1 environment
-3. Runs `idf.py build` in `esp-dl/`
-4. Runs `idf.py flash` on `/dev/ttyACM0`
-5. Opens a serial monitor and waits for an inference result
-6. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash
+2. Copies `dataset.bin` from the same directory if present
+3. Sources the ESP-IDF v6.0.1 environment
+4. Runs `idf.py build` in `esp-dl/`
+5. Runs `idf.py flash` on `/dev/ttyACM0`
+6. Flashes `dataset.bin` to the `dataset` partition if present
+7. Opens a serial monitor and waits for an inference result
+8. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash
 
 ## Training a Model
 
@@ -100,6 +102,18 @@ Results are stored in an Optuna SQLite database (`mamba_hpo.db`) and ONNX files 
 2. **Check op compatibility** → `python tools/check_espdl_ops.py ~/Models/<model>.onnx`
 3. **Quantize** → generates `.espdl` file placed in `esp-dl/main/model/`
 4. **Build & flash** → `./run-esp.sh ~/Models/<model>.espdl`
+
+## Dataset Partition
+
+A `dataset` partition (type `data`, subtype `undefined`, 2 MB at offset `0x7e0000`) is defined in `partitions.csv` for storing a dataset binary on the ESP32-S3 flash.
+
+To include a dataset:
+
+1. Place `dataset.bin` next to your `.espdl` model file (same directory)
+2. Run `./run-esp.sh` as normal — it automatically copies and flashes the dataset to its partition
+3. The firmware logs the partition info at startup via `load_dataset()` in `app_main.cpp`
+
+The `load_dataset()` function finds the partition with `esp_partition_find_first()` and returns its size. To read the actual data, use `esp_partition_mmap()` or `esp_partition_read()` on the returned handle.
 
 ## Known Issues
 
