@@ -95,6 +95,62 @@ static float run_and_time(dl::Model *model, int num_runs) {
 }
 
 // ---------------------------------------------------------------------------
+// Dataset inference
+// ---------------------------------------------------------------------------
+
+static bool run_dataset_inference(dl::Model *model, const Dataset &ds,
+                                  dl::TensorBase *input_tensor,
+                                  dl::TensorBase *output_tensor,
+                                  int num_classes,
+                                  const std::vector<int> &input_shape,
+                                  int input_exponent, dl::dtype_t input_dtype) {
+  int n_samples = (int)ds.num_samples;
+  ESP_LOGI(TAG, "Running inference on %d samples", n_samples);
+
+  float scores[16]; // supports up to 16 classes
+  if (num_classes > 16) {
+    ESP_LOGE(TAG, "Too many classes: %d", num_classes);
+    return false;
+  }
+
+  // Time the first sample separately (after warm-up)
+  input_tensor->assign(input_shape, ds.data, input_exponent, input_dtype);
+  model->run(); // warm-up
+  float avg_us = run_and_time(model, 10);
+  ESP_LOGI(TAG, "Average single-inference latency: %.1f us (%.3f ms)", avg_us,
+           avg_us / 1000.0f);
+
+  // Run on all dataset samples
+  for (int i = 0; i < n_samples; ++i) {
+    const void *sample_ptr = ds.data + i * ds.elements_per_sample;
+
+    // Assign quantised sample data directly to the model's input tensor
+    input_tensor->assign(input_shape, sample_ptr, input_exponent, input_dtype);
+
+    // Run inference
+    model->run();
+
+    // Dequantise and print prediction for a few representative samples
+    if (!dequantize_scores(output_tensor, scores, num_classes)) {
+      ESP_LOGE(TAG, "Failed to dequantise output on sample %d", i);
+      continue;
+    }
+
+    int predicted = find_argmax(scores, num_classes);
+
+    if (i < 5 || i == n_samples - 1) {
+      ESP_LOGI(TAG, "Sample %4d: prediction %d (confidence %.4f)", i, predicted,
+               scores[predicted]);
+    } else if (i == 5) {
+      ESP_LOGI(TAG, "...");
+    }
+  }
+
+  ESP_LOGI(TAG, "Inferred %d samples", n_samples);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Output decoding
 // ---------------------------------------------------------------------------
 
@@ -278,50 +334,12 @@ extern "C" void app_main(void) {
   //
   // Run inference on dataset samples
   //
-  int n_samples = (int)ds.num_samples;
-  ESP_LOGI(TAG, "Running inference on %d samples", n_samples);
-
-  float scores[16]; // supports up to 16 classes
-  if (num_classes > 16) {
-    ESP_LOGE(TAG, "Too many classes: %d", num_classes);
+  if (!run_dataset_inference(model, ds, input_tensor, output_tensor,
+                             num_classes, input_shape, input_exponent,
+                             input_dtype)) {
     cleanup_model(model);
     return;
   }
-
-  // Time the first sample separately (after warm-up)
-  input_tensor->assign(input_shape, ds.data, input_exponent, input_dtype);
-  model->run(); // warm-up
-  float avg_us = run_and_time(model, 10);
-  ESP_LOGI(TAG, "Average single-inference latency: %.1f us (%.3f ms)", avg_us,
-           avg_us / 1000.0f);
-
-  // Run on all dataset samples
-  for (int i = 0; i < n_samples; ++i) {
-    const void *sample_ptr = ds.data + i * ds.elements_per_sample;
-
-    // Assign quantised sample data directly to the model's input tensor
-    input_tensor->assign(input_shape, sample_ptr, input_exponent, input_dtype);
-
-    // Run inference
-    model->run();
-
-    // Dequantise and print prediction for a few representative samples
-    if (!dequantize_scores(output_tensor, scores, num_classes)) {
-      ESP_LOGE(TAG, "Failed to dequantise output on sample %d", i);
-      continue;
-    }
-
-    int predicted = find_argmax(scores, num_classes);
-
-    if (i < 5 || i == n_samples - 1) {
-      ESP_LOGI(TAG, "Sample %4d: prediction %d (confidence %.4f)", i, predicted,
-               scores[predicted]);
-    } else if (i == 5) {
-      ESP_LOGI(TAG, "...");
-    }
-  }
-
-  ESP_LOGI(TAG, "Inferred %d samples", n_samples);
 
   //
   // Profiling summary (grouped by op type)
