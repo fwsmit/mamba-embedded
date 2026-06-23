@@ -25,6 +25,8 @@ from .quantize import (
     load_calibration,
     load_datasets,
     evaluate_quantization_loss,
+    get_input_quantization,
+    quantize_dataset_to_bin,
     infer_input_shape,
     collate_fn,
     CALIB_STEPS,
@@ -292,7 +294,7 @@ def main() -> None:
     print(f"  Loaded {n_calib_samples} calibration samples")
 
     print("Building validation dataloader ...")
-    _, val_ds, _ = load_datasets(dataset)
+    val_ds = load_datasets(dataset, split="val")
     print(f"  Loaded {len(val_ds)} validation samples")
     print()
 
@@ -341,6 +343,12 @@ def main() -> None:
             device=device,
             collate_fn=collate_fn,
         )
+
+        # Export quantized validation dataset for on-device inference
+        print(f"    Exporting quantized validation dataset ...")
+        configs = get_input_quantization(quant_graph)
+        dataset_bin_path = experiments_dir / f"dataset-trial-{tn}.bin"
+        quantize_dataset_to_bin(configs, val_ds, dataset_bin_path)
 
         # Evaluate quantized model against the ONNX baseline
         print(f"    Evaluating on validation set ...")
