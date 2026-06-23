@@ -95,6 +95,14 @@ static float run_and_time(dl::Model *model, int num_runs) {
 }
 
 // ---------------------------------------------------------------------------
+// Output decoding (forward declarations)
+// ---------------------------------------------------------------------------
+
+static bool dequantize_scores(dl::TensorBase *output, float *scores,
+                              int num_classes);
+static int find_argmax(const float *scores, int num_classes);
+
+// ---------------------------------------------------------------------------
 // Dataset inference
 // ---------------------------------------------------------------------------
 
