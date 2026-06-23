@@ -136,7 +136,8 @@ def train_model_and_test_accuracy(seed):
     lr = 0.0054943708267906795
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-    train_ds, valid_ds, _ = load_har_data(dataset_dir)
+    train_ds = load_har_data(dataset_dir, split="train")
+    valid_ds = load_har_data(dataset_dir, split="val")
 
     train_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True, "shuffle": True}
     validate_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True}

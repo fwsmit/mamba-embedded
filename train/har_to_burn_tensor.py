@@ -23,7 +23,7 @@ RANDOM_SEED  = 0         # fix seed so val_ds membership is deterministic
 OUT_FILE = Path("./src/data/test_tensor_har.rs")
 
 # ── Load dataset ───────────────────────────────────────────────────────────────
-_, val_ds, _ = load_har_data(DATASET_DIR)
+val_ds = load_har_data(DATASET_DIR, split="val")
 
 # val_ds is expected to be a list/dataset of (features_tensor, label) pairs.
 # Adjust the unpacking below if your dataset returns a different structure.

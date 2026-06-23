@@ -84,19 +84,23 @@ def parse_args():
 # ---------------------------------------------------------------------------
 
 
-def load_datasets(dataset: str):
+def load_datasets(dataset: str, split: str = "train"):
     """
-    Load all dataset splits for a given dataset.
+    Load a specific split of a dataset.
 
-    Returns (train_ds, val_ds, test_ds).
+    Args:
+        dataset: "har" or "kws"
+        split: "train", "val", or "test"
+
+    Returns the requested dataset split.
     """
     data_dir = Path.home() / "Datasets"
 
     if dataset == "har":
-        return load_har_data(data_dir)
+        return load_har_data(data_dir, split=split)
 
     elif dataset == "kws":
-        return load_speechcommands_data(data_dir=str(data_dir))
+        return load_speechcommands_data(data_dir=str(data_dir), split=split)
 
     else:
         raise ValueError(f"Unsupported dataset: {dataset}")
@@ -179,7 +183,7 @@ def load_calibration(
     Build calibration dataloader from existing datasets.
     """
 
-    train_ds, _, _ = load_datasets(dataset)
+    train_ds = load_datasets(dataset, split="train")
 
     rng = np.random.default_rng(RANDOM_SEED)
 
@@ -690,8 +694,8 @@ def quantize_dataset_to_bin(
         print("WARNING: No quantized input config found — skipping dataset quantization.")
         return
 
-    scale = tqc.scale
-    offset = tqc.offset
+    scale = tqc.scale.cpu()
+    offset = tqc.offset.cpu()
     quant_min = tqc.quant_min
     quant_max = tqc.quant_max
 
@@ -828,7 +832,7 @@ def main():
     # -----------------------------------------------------------------------
 
     print("\n[3/4] Exporting quantized validation dataset ...")
-    _, val_ds, _ = load_datasets(dataset)
+    val_ds = load_datasets(dataset, split="val")
 
     dataset_bin_path = out_dir / "dataset.bin"
     quantize_dataset_to_bin(configs, val_ds, dataset_bin_path)

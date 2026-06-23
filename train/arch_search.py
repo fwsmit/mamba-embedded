@@ -256,9 +256,11 @@ def objective(trial):
     optimizer = getattr(optim, optimizer_name)(model.parameters(), lr=lr)
 
     if DATASET == "har":
-        train_ds, valid_ds, _ = load_har_data(dataset_dir)
+        train_ds = load_har_data(dataset_dir, split="train")
+        valid_ds = load_har_data(dataset_dir, split="val")
     else:
-        train_ds, valid_ds, _ = load_speechcommands_data(dataset_dir)
+        train_ds = load_speechcommands_data(dataset_dir, split="train")
+        valid_ds = load_speechcommands_data(dataset_dir, split="val")
 
     train_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True, "shuffle": True}
     validate_kwargs = {"batch_size": BATCHSIZE, "pin_memory": True}

@@ -10,7 +10,8 @@ and writes a Rust source file containing:
 import os
 import torch
 from pathlib import Path
-from .data import load_speechcommands_data, CLASSES
+from .data import load_speechcommands_data
+from .kws_dataset_gen import ALL_LABELS as CLASSES
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DATASET_DIR  = os.path.expanduser("~/Datasets")
@@ -23,7 +24,7 @@ OUT_FILE     = Path("./src/data/test_tensor_kws.rs")
 KWS_CLASSES = CLASSES
 
 # ── Load dataset ───────────────────────────────────────────────────────────────
-_, val_ds, _ = load_speechcommands_data(DATASET_DIR)
+val_ds = load_speechcommands_data(DATASET_DIR, split="val")
 
 # val_ds is expected to be a list/dataset of (features_tensor, label) pairs.
 # Adjust the unpacking below if your dataset returns a different structure.

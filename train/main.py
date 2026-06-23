@@ -138,14 +138,18 @@ def main():
     if dataset_type == "mnist":
         output_dim = get_data_output_size(dataset_type)
         d_model = 8
-        train_ds, val_ds, test_ds = load_mnist_data(dataset_dir)
+        train_ds = load_mnist_data(dataset_dir, split="train")
+        val_ds = load_mnist_data(dataset_dir, split="val")
+        test_ds = load_mnist_data(dataset_dir, split="test")
     elif dataset_type == "har":
         output_dim = get_data_output_size(dataset_type)
         d_model = 30
         d_state = 15
         d_conv = 4
         expand = 1
-        train_ds, val_ds, test_ds = load_har_data(dataset_dir)
+        train_ds = load_har_data(dataset_dir, split="train")
+        val_ds = load_har_data(dataset_dir, split="val")
+        test_ds = load_har_data(dataset_dir, split="test")
     elif dataset_type == "kws":
         log_interval = 40
         output_dim = get_data_output_size(dataset_type)
@@ -153,7 +157,9 @@ def main():
         d_state = 16
         d_conv = 4
         expand = 1
-        train_ds, val_ds, test_ds = load_speechcommands_data(dataset_dir)
+        train_ds = load_speechcommands_data(dataset_dir, split="train")
+        val_ds = load_speechcommands_data(dataset_dir, split="val")
+        test_ds = load_speechcommands_data(dataset_dir, split="test")
     else:
         sys.exit(f"Unknown dataset: {dataset_type}. Choose 'mnist', 'kws' or 'har'")
 
