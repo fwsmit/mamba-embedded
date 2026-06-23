@@ -23,7 +23,8 @@ PYTHON="$IDF_PYTHON_ENV_PATH/bin/python"
 
 cp "$MODEL_PATH" "$SCRIPT_DIR/esp-dl/main/model/model.espdl"
 
-# Copy dataset.bin from the same directory, if present
+# Copy dataset.bin from the same directory, if present.
+# dataset.bin will be auto-flashed by idf.py flash via the CMake build system.
 DATASET_SRC="$(dirname "$MODEL_PATH")/dataset.bin"
 if [ -f "$DATASET_SRC" ]; then
     cp "$DATASET_SRC" "$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
@@ -37,20 +38,12 @@ BUILD_OUT=$("$PYTHON" "$IDF_PY" build 2>&1) || {
   exit 1
 }
 
-# Flash — surface errors instead of swallowing them
+# Flash — surfaces errors instead of swallowing them.
+# dataset.bin (if present) is now auto-flashed via the CMake build system.
 FLASH_OUT=$("$PYTHON" "$IDF_PY" -p /dev/ttyACM0 flash 2>&1) || {
   echo "$FLASH_OUT" | awk 'length < 300'
   exit 1
 }
-
-# Flash dataset to its partition, if present
-DATASET_BIN="$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
-if [ -f "$DATASET_BIN" ]; then
-    DATASET_OFFSET=0x7e0000
-    "$PYTHON" -m esptool --chip esp32s3 -p /dev/ttyACM0 -b 460800 \
-        --before default_reset --after no_reset \
-        write_flash "$DATASET_OFFSET" "$DATASET_BIN" 2>&1
-fi
 
 # Monitor serial output — run as a subprocess so stdout stays on bash's pipe
 "$PYTHON" - /dev/ttyACM0 <<'PYEOF'

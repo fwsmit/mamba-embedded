@@ -26,10 +26,9 @@ This script:
 2. Copies `dataset.bin` from the same directory if present
 3. Sources the ESP-IDF v6.0.1 environment
 4. Runs `idf.py build` in `esp-dl/`
-5. Runs `idf.py flash` on `/dev/ttyACM0`
-6. Flashes `dataset.bin` to the `dataset` partition if present
-7. Opens a serial monitor and waits for an inference result
-8. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash
+5. Runs `idf.py flash` on `/dev/ttyACM0` (dataset partition is flashed automatically by the build system)
+6. Opens a serial monitor and waits for an inference result
+7. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash
 
 ## Training a Model
 
@@ -107,13 +106,22 @@ Results are stored in an Optuna SQLite database (`mamba_hpo.db`) and ONNX files 
 
 A `dataset` partition (type `data`, subtype `undefined`, 2 MB at offset `0x7e0000`) is defined in `partitions.csv` for storing a dataset binary on the ESP32-S3 flash.
 
+The dataset partition is integrated into the ESP-IDF build system: if `dataset.bin` exists in `esp-dl/main/model/`, the CMake build automatically registers it as a flash image for the `dataset` partition. This means `idf.py flash` handles everything in one step.
+
 To include a dataset:
 
 1. Place `dataset.bin` next to your `.espdl` model file (same directory)
-2. Run `./run-esp.sh` as normal — it automatically copies and flashes the dataset to its partition
-3. The firmware logs the partition info at startup via `load_dataset()` in `app_main.cpp`
+2. Run `./run-esp.sh` as normal — the build system handles flashing both the firmware and the dataset
 
-The `load_dataset()` function mmaps the partition and parses the 8-byte header (`uint32 num_samples`, `uint32 elements_per_sample`) followed by the quantized int8 sample data. The firmware then runs inference on every sample by assigning each one to the model's input tensor via `TensorBase::assign()` before calling `model->run()`.
+For manual testing (without `run-esp.sh`), just copy both files:
+```bash
+cp path/to/model.espdl  esp-dl/main/model/
+cp path/to/dataset.bin  esp-dl/main/model/
+cd esp-dl
+idf.py build && idf.py -p /dev/ttyACM0 flash
+```
+
+The firmware logs the partition info at startup via `load_dataset()` in `app_main.cpp`. That function mmaps the partition and parses the 8-byte header (`uint32 num_samples`, `uint32 elements_per_sample`) followed by the quantized int8 sample data. The firmware then runs inference on every sample by assigning each one to the model's input tensor via `TensorBase::assign()` before calling `model->run()`.
 
 ## Known Issues
 
