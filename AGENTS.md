@@ -113,7 +113,7 @@ To include a dataset:
 2. Run `./run-esp.sh` as normal — it automatically copies and flashes the dataset to its partition
 3. The firmware logs the partition info at startup via `load_dataset()` in `app_main.cpp`
 
-The `load_dataset()` function finds the partition with `esp_partition_find_first()` and returns its size. To read the actual data, use `esp_partition_mmap()` or `esp_partition_read()` on the returned handle.
+The `load_dataset()` function mmaps the partition and parses the 8-byte header (`uint32 num_samples`, `uint32 elements_per_sample`) followed by the quantized int8 sample data. The firmware then runs inference on every sample by assigning each one to the model's input tensor via `TensorBase::assign()` before calling `model->run()`.
 
 ## Known Issues
 
