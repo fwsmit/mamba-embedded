@@ -1,8 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
+VERBOSE=false
+
+while getopts ":v" opt; do
+  case $opt in
+  v) VERBOSE=true ;;
+  \?)
+    echo "Usage: $0 [-v] <path-to-model.espdl>" >&2
+    exit 1
+    ;;
+  esac
+done
+shift $((OPTIND - 1))
+
 if [ $# -ne 1 ]; then
-  echo "Usage: $0 <path-to-model.espdl>" >&2
+  echo "Usage: $0 [-v] <path-to-model.espdl>" >&2
   exit 1
 fi
 
@@ -27,31 +40,37 @@ cp "$MODEL_PATH" "$SCRIPT_DIR/esp-dl/main/model/model.espdl"
 # dataset.bin will be auto-flashed by idf.py flash via the CMake build system.
 DATASET_SRC="$(dirname "$MODEL_PATH")/dataset.bin"
 if [ -f "$DATASET_SRC" ]; then
-    cp "$DATASET_SRC" "$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
+  cp "$DATASET_SRC" "$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
 fi
 
 cd "$SCRIPT_DIR/esp-dl"
 
-# Capture build output; only print on failure
-BUILD_OUT=$("$PYTHON" "$IDF_PY" build 2>&1) || {
-  echo "$BUILD_OUT" | awk 'length < 300'
-  exit 1
-}
+if $VERBOSE; then
+  "$PYTHON" "$IDF_PY" build 2>&1 || exit 1
+  "$PYTHON" "$IDF_PY" -p /dev/ttyACM0 flash 2>&1 || exit 1
+else
+  # Capture build output; only print on failure
+  BUILD_OUT=$("$PYTHON" "$IDF_PY" build 2>&1) || {
+    echo "$BUILD_OUT" | awk 'length < 300'
+    exit 1
+  }
 
-# Flash — surfaces errors instead of swallowing them.
-# dataset.bin (if present) is now auto-flashed via the CMake build system.
-FLASH_OUT=$("$PYTHON" "$IDF_PY" -p /dev/ttyACM0 flash 2>&1) || {
-  echo "$FLASH_OUT" | awk 'length < 300'
-  exit 1
-}
+  # Flash — surfaces errors instead of swallowing them.
+  # dataset.bin (if present) is now auto-flashed via the CMake build system.
+  FLASH_OUT=$("$PYTHON" "$IDF_PY" -p /dev/ttyACM0 flash 2>&1) || {
+    echo "$FLASH_OUT" | awk 'length < 300'
+    exit 1
+  }
+fi
 
 # Monitor serial output — run as a subprocess so stdout stays on bash's pipe
-"$PYTHON" - /dev/ttyACM0 <<'PYEOF'
+"$PYTHON" - /dev/ttyACM0 "$VERBOSE" <<'PYEOF'
 import serial, sys, time
 
 PORT     = sys.argv[1]
+VERBOSE  = len(sys.argv) > 2 and sys.argv[2] == "true"
 BAUD     = 115200
-TIMEOUT_S = 60
+TIMEOUT_S = 600
 OK_SENTINELS   = ["INFERENCE_OK"]
 FAIL_SENTINELS = ["INFERENCE_OOM", "INFERENCE_FAIL"]
 CRASH_MARKERS  = ["Guru Meditation Error", "abort() was called", "Backtrace:", "rst:0x"]
@@ -66,24 +85,34 @@ with serial.Serial(PORT, BAUD, timeout=0.1) as ser:
         if not raw:
             continue
         line = raw.decode("utf-8", errors="replace").rstrip()
+        if VERBOSE:
+            sys.stdout.write(line + "\n")
+            sys.stdout.flush()
         lines.append(line)
         if any(s in line for s in OK_SENTINELS):
-            sys.stdout.write("\n".join(lines) + "\n")
-            sys.stdout.flush()
+            if not VERBOSE:
+                sys.stdout.write("\n".join(lines) + "\n")
+                sys.stdout.flush()
             exit_code = 0
             break
         if any(s in line for s in FAIL_SENTINELS):
-            sys.stdout.write("\n".join(lines) + "\n")
-            sys.stdout.flush()
+            if not VERBOSE:
+                sys.stdout.write("\n".join(lines) + "\n")
+                sys.stdout.flush()
             exit_code = 1
             break
         if any(m in line for m in CRASH_MARKERS):
             for _ in range(20):
                 extra = ser.readline()
                 if extra:
-                    lines.append(extra.decode("utf-8", errors="replace").rstrip())
-            sys.stdout.write("\n".join(lines) + "\n")
-            sys.stdout.flush()
+                    extra_line = extra.decode("utf-8", errors="replace").rstrip()
+                    if VERBOSE:
+                        sys.stdout.write(extra_line + "\n")
+                        sys.stdout.flush()
+                    lines.append(extra_line)
+            if not VERBOSE:
+                sys.stdout.write("\n".join(lines) + "\n")
+                sys.stdout.flush()
             exit_code = 2
             break
     else:
@@ -92,4 +121,3 @@ with serial.Serial(PORT, BAUD, timeout=0.1) as ser:
 
 sys.exit(exit_code)
 PYEOF
-

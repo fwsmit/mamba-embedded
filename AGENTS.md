@@ -19,6 +19,7 @@ To build the ESP-DL firmware with a given quantized model, flash it to the devic
 
 ```bash
 ./run-esp.sh path/to/model.espdl
+./run-esp.sh -v path/to/model.espdl   # verbose: real-time build, flash & serial output
 ```
 
 This script:
@@ -28,7 +29,7 @@ This script:
 4. Runs `idf.py build` in `esp-dl/`
 5. Runs `idf.py flash` on `/dev/ttyACM0` (dataset partition is flashed automatically by the build system)
 6. Opens a serial monitor and waits for an inference result
-7. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash
+7. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash. Add `-v` before the model path to see all build, flash, and serial output in real time (default is non-verbose, which only prints build/flash output on failure and buffers serial output until a sentinel is hit).
 
 ## Training a Model
 
