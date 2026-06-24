@@ -20,6 +20,8 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from omegaconf import OmegaConf
 import os
+import json
+from pathlib import Path
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -194,6 +196,67 @@ def create_pareto_front_plot(studies_data):
     print("Saved figures/fig1_pareto_front.png and fig1_pareto_front.pdf")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Figure 2 – Float vs Quantized Accuracy Comparison
+# ═══════════════════════════════════════════════════════════════════════════════
+def create_accuracy_comparison_plot(study_name, data):
+    """
+    Plot float_accuracy vs quantized_accuracy for all models in a results.json.
+
+    Parameters
+    ----------
+    study_name : str
+        Name of the study (used for figure title and filename).
+    data : list of dict
+        Entries from results.json with float_accuracy and quantized_accuracy.
+    """
+    # Filter out entries with NaN float_accuracy
+    data = [d for d in data if not np.isnan(d.get("float_accuracy", np.nan))]
+    data.sort(key=lambda d: d["quantized_accuracy"], reverse=True)
+
+    if not data:
+        print(f"  No valid accuracy entries found for {study_name}.")
+        return
+
+    trial_labels = [str(d["trial_number"]) for d in data]
+    x = np.arange(len(data))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    bars_float = ax.bar(x - width / 2, [d["float_accuracy"] for d in data],
+                        width, label="Float Accuracy", color="#4C9BE8", edgecolor="white")
+    bars_quant = ax.bar(x + width / 2, [d["quantized_accuracy"] for d in data],
+                        width, label="Quantized Accuracy", color="#E8834C", edgecolor="white")
+
+    ax.set_ylabel("Accuracy (%)", fontsize=11)
+    ax.set_xlabel("Trial (sorted by float accuracy)", fontsize=11)
+    ax.set_title(f"{study_name} — Float vs Quantized Accuracy",
+                 fontsize=13, fontweight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(trial_labels, rotation=45, ha="right", fontsize=8)
+    ax.set_ylim(0, 105)
+    ax.legend(fontsize=10)
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+
+    # Annotate bars with the accuracy value
+    for bar in bars_float:
+        h = bar.get_height()
+        if h > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2, h + 0.5, f"{h:.1f}",
+                    ha="center", va="bottom", fontsize=6)
+    for bar in bars_quant:
+        h = bar.get_height()
+        if h > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2, h + 0.5, f"{h:.1f}",
+                    ha="center", va="bottom", fontsize=6)
+
+    fig.tight_layout()
+    fig.savefig(fig_path(f"fig2_accuracy_{study_name}.png"), dpi=FIG_DPI)
+    fig.savefig(fig_path(f"fig2_accuracy_{study_name}.pdf"))
+    print(f"  Saved figures/fig2_accuracy_{study_name}.png and .pdf")
+
+
 def study_name_from_config(config_path: str) -> str:
     """Load a Hydra config YAML and return the corresponding Optuna study name."""
     cfg = OmegaConf.load(config_path)
@@ -212,11 +275,13 @@ def main():
 
     n = len(args.configs)
     if n == 0:
-        parser.error("At least one config path is required.")
+        parser.error("Provide at least one config path.")
 
     if n > len(COLORS):
         print(f"Warning: {n} studies provided but only {len(COLORS)} colours defined. "
               f"Colours will be recycled from the beginning.")
+
+    repo_root = Path(__file__).resolve().parent.parent
 
     # ── Gather study data ─────────────────────────────────────────────────────
     studies_data = []
@@ -244,8 +309,21 @@ def main():
             "idx": i,
         })
 
-    # ── Plot ──────────────────────────────────────────────────────────────────
-    create_pareto_front_plot(studies_data)
+        # ── Accuracy comparison (inferred from config) ────────────────────────
+        results_path = repo_root / "experiments" / name / "results.json"
+        if results_path.exists():
+            print(f"  Loading accuracy results from {results_path} …")
+            with open(results_path) as f:
+                results_data = json.load(f)
+            create_accuracy_comparison_plot(name, results_data)
+        else:
+            print(f"  No results.json found at {results_path}, skipping accuracy plot.")
+
+    # ── Pareto front plot ────────────────────────────────────────────────────
+    if n > 1:
+        create_pareto_front_plot(studies_data)
+    else:
+        print("\nOnly one study provided — skipping Pareto front comparison.")
 
     print("\nAll figures saved. Done.")
     plt.show()
