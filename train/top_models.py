@@ -176,6 +176,50 @@ def make_reference_point(values: list[tuple[float, float]]) -> tuple[float, floa
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Predictions parsing
+# ---------------------------------------------------------------------------
+
+
+def parse_predictions(stdout: str) -> list[int]:
+    """
+    Extract machine-readable predictions from the firmware's stdout.
+
+    The firmware outputs:
+        ===PREDICTIONS_START===
+        <num_samples>
+        <prediction_0>
+        <prediction_1>
+        ...
+        ===PREDICTIONS_END===
+
+    Returns a list of predictions (one per sample), or an empty list if the
+    markers are not found.
+    """
+    start_marker = "===PREDICTIONS_START==="
+    end_marker = "===PREDICTIONS_END==="
+
+    start_idx = stdout.find(start_marker)
+    if start_idx == -1:
+        return []
+    end_idx = stdout.find(end_marker, start_idx)
+    if end_idx == -1:
+        return []
+
+    body = stdout[start_idx + len(start_marker):end_idx].strip()
+    lines = body.splitlines()
+    if not lines:
+        return []
+
+    # First line is num_samples; skip it.
+    predictions = []
+    for line in lines[1:]:
+        line = line.strip()
+        if line:
+            predictions.append(int(line))
+    return predictions
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -404,6 +448,9 @@ def main() -> None:
         if result.stderr:
             print(f"    stderr:\n{result.stderr}")
 
+        # Parse machine-readable predictions from firmware output
+        predictions = parse_predictions(result.stdout)
+
         # Store output alongside the .espdl file
         output_path = src_espdl.with_suffix(".output")
         with open(output_path, "w") as f:
@@ -411,6 +458,21 @@ def main() -> None:
             f.write(f"stdout:\n{result.stdout}")
             f.write(f"stderr:\n{result.stderr}")
         print(f"    Output saved: {output_path}")
+
+        # Save predictions alongside results.json
+        if predictions:
+            import json as _json
+            preds_path = experiments_dir / "predictions.json"
+            preds: dict = {}
+            if preds_path.exists():
+                with open(preds_path, "r") as _f:
+                    preds = _json.load(_f)
+            preds[str(tn)] = predictions
+            with open(preds_path, "w") as _f:
+                _json.dump(preds, _f, indent=2)
+            print(f"    Predictions saved for trial #{tn}: {len(predictions)} samples")
+        else:
+            print(f"    WARNING: no machine-readable predictions found in output")
         print()
 
     print("All selected models deployed.")

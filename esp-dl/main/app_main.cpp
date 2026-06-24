@@ -1,6 +1,7 @@
 #include "dl_model_base.hpp"
 #include "esp_log.h"
 #include "esp_partition.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 
 #include <algorithm>
@@ -111,7 +112,9 @@ static bool run_dataset_inference(dl::Model *model, const Dataset &ds,
                                   dl::TensorBase *output_tensor,
                                   int num_classes,
                                   const std::vector<int> &input_shape,
-                                  int input_exponent, dl::dtype_t input_dtype) {
+                                  int input_exponent, dl::dtype_t input_dtype,
+                                  bool machine_readable = false) {
+  esp_task_wdt_delete(xTaskGetIdleTaskHandleForCore(0));
   int n_samples = (int)ds.num_samples;
   ESP_LOGI(TAG, "Running inference on %d samples", n_samples);
 
@@ -127,6 +130,11 @@ static bool run_dataset_inference(dl::Model *model, const Dataset &ds,
   float avg_us = run_and_time(model, 10);
   ESP_LOGI(TAG, "Average single-inference latency: %.1f us (%.3f ms)", avg_us,
            avg_us / 1000.0f);
+
+  if (machine_readable) {
+    printf("===PREDICTIONS_START===\n");
+    printf("%d\n", n_samples);
+  }
 
   // Run on all dataset samples
   for (int i = 0; i < n_samples; ++i) {
@@ -146,7 +154,9 @@ static bool run_dataset_inference(dl::Model *model, const Dataset &ds,
 
     int predicted = find_argmax(scores, num_classes);
 
-    if (i < 5 || i == n_samples - 1) {
+    if (machine_readable) {
+      printf("%d\n", predicted);
+    } else if (i < 5 || i == n_samples - 1) {
       ESP_LOGI(TAG, "Sample %4d: prediction %d (confidence %.4f)", i, predicted,
                scores[predicted]);
     } else if (i == 5) {
@@ -154,7 +164,12 @@ static bool run_dataset_inference(dl::Model *model, const Dataset &ds,
     }
   }
 
+  if (machine_readable) {
+    printf("===PREDICTIONS_END===\n");
+  }
+
   ESP_LOGI(TAG, "Inferred %d samples", n_samples);
+  esp_task_wdt_add(xTaskGetIdleTaskHandleForCore(0));
   return true;
 }
 
@@ -344,7 +359,7 @@ extern "C" void app_main(void) {
   //
   if (!run_dataset_inference(model, ds, input_tensor, output_tensor,
                              num_classes, input_shape, input_exponent,
-                             input_dtype)) {
+                             input_dtype, true)) {
     cleanup_model(model);
     return;
   }
