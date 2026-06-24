@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Select the top fraction of models from an Optuna HPO study using greedy
-hypervolume contribution selection, then quantize each selected model to
-ESP-DL .espdl format.
+Select the top fraction of models from one or more Optuna HPO studies using
+greedy hypervolume contribution selection, then quantize each selected model
+to ESP-DL .espdl format.
 
 Usage:
-    python -m train.top_models --study-name mamba-1-kws-2
-    python -m train.top_models --study-name mamba-1-har
+    python -m train.top_models config/arch-mamba1-kws.yaml
+    python -m train.top_models config/arch-mamba1-kws.yaml config/arch-mamba1-har.yaml
 """
 
 import argparse
@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import optuna
 import torch
+from omegaconf import OmegaConf
 from optuna.trial import TrialState
 from torch.utils.data import DataLoader
 
@@ -219,17 +220,26 @@ def parse_predictions(stdout: str) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+def study_name_from_config(config_path: str) -> str:
+    """Load a Hydra config YAML and return the corresponding Optuna study name."""
+    cfg = OmegaConf.load(config_path)
+    name = f"{cfg.MODEL}-{cfg.DATASET}"
+    if cfg.get("EXPERIMENT_NAME"):
+        name += f"-{cfg.EXPERIMENT_NAME}"
+    return name
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Select the top fraction of models from an Optuna study "
+            "Select the top fraction of models from one or more Optuna studies "
             "by greedy hypervolume contribution."
         )
     )
     parser.add_argument(
-        "--study-name",
-        required=True,
-        help="Optuna study name (e.g. mamba-1-kws-2)",
+        "configs",
+        nargs="+",
+        help="Paths to Hydra config YAML files (one or more)",
     )
     parser.add_argument(
         "--storage",
@@ -476,26 +486,26 @@ def deploy_trial(
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    args = parse_args()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    repo_root = Path(__file__).resolve().parent.parent
-    n_calib_samples = CALIB_STEPS * CALIB_BATCH
-
+def process_study(
+    study_name: str,
+    args: argparse.Namespace,
+    repo_root: Path,
+    device: str,
+    n_calib_samples: int,
+    run_script: Path,
+) -> None:
+    """Run the full pipeline (select, quantize, deploy) for one study."""
     # Load study and select top models
-    complete, values, trial_numbers = load_complete_trials(args.study_name, args.storage)
+    complete, values, trial_numbers = load_complete_trials(study_name, args.storage)
     selected_trials = select_top_models(values, trial_numbers, args.top_fraction)
 
-    if args.output:
-        write_selected_trials(selected_trials, args.output)
-
     # Infer dataset and set up directories
-    dataset = infer_dataset(args.study_name)
-    onnx_dir = Path.home() / "Models" / args.study_name
-    experiments_dir = repo_root / "experiments" / args.study_name
+    dataset = infer_dataset(study_name)
+    onnx_dir = Path.home() / "Models" / study_name
+    experiments_dir = repo_root / "experiments" / study_name
     experiments_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build data loaders (reused for all models)
+    # Build data loaders (reused for all models in this study)
     calib_loader, val_ds, val_labels = build_data(dataset, repo_root, n_calib_samples)
 
     # Load previously quantized results to avoid rework
@@ -503,7 +513,7 @@ def main() -> None:
 
     # Quantize each selected model
     print("=" * 62)
-    print("  QUANTIZING SELECTED MODELS")
+    print(f"  QUANTIZING SELECTED MODELS — {study_name}")
     print("=" * 62)
     print()
 
@@ -511,7 +521,7 @@ def main() -> None:
         if tn in done_trials:
             print(f"  Trial #{tn}: already quantized, skipping\n")
             continue
-        quantize_trial(tn, args.study_name, onnx_dir, experiments_dir,
+        quantize_trial(tn, study_name, onnx_dir, experiments_dir,
                        calib_loader, val_ds, device, results)
 
     # Final persist
@@ -524,17 +534,42 @@ def main() -> None:
     # Deploy each quantized model to ESP32-S3
     print()
     print("=" * 62)
-    print("  DEPLOYING TO ESP32-S3")
+    print(f"  DEPLOYING TO ESP32-S3 — {study_name}")
     print("=" * 62)
     print()
 
-    run_script = repo_root / "run-esp.sh"
-
     for tn in selected_trials:
-        deploy_trial(tn, args.study_name, experiments_dir, run_script,
+        # Check if deploy already done (mcu_accuracy present)
+        deploy_done = any(
+            entry["trial_number"] == tn and "mcu_accuracy" in entry
+            for entry in results
+        )
+        if deploy_done:
+            print(f"  Trial #{tn}: already deployed, skipping\n")
+            continue
+        deploy_trial(tn, study_name, experiments_dir, run_script,
                      results, val_labels)
 
     print("All selected models deployed.")
+
+
+
+def main() -> None:
+    args = parse_args()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    repo_root = Path(__file__).resolve().parent.parent
+    n_calib_samples = CALIB_STEPS * CALIB_BATCH
+    run_script = repo_root / "run-esp.sh"
+
+    for config_path in args.configs:
+        study_name = study_name_from_config(config_path)
+        print()
+        print("#" * 62)
+        print(f"#  Processing study: {study_name}  (from {config_path})")
+        print("#" * 62)
+        print()
+
+        process_study(study_name, args, repo_root, device, n_calib_samples, run_script)
 
 
 if __name__ == "__main__":
