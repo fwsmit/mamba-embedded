@@ -402,6 +402,7 @@ def main() -> None:
             val_ds=val_ds,
             device=device,
         )
+        metrics.pop("accuracy_drop", None)  # Computed later as float_accuracy - mcu_accuracy
         metrics["trial_number"] = tn
         results.append(metrics)
 
@@ -427,6 +428,11 @@ def main() -> None:
     print()
 
     run_script = repo_root / "run-esp.sh"
+
+    # Collect validation ground truth labels for MCU accuracy computation
+    from torch.utils.data import DataLoader as _DataLoader
+    val_loader = _DataLoader(val_ds, batch_size=1, shuffle=False, drop_last=False)
+    val_labels = np.concatenate([target.numpy() for _, target in val_loader])
 
     for tn in selected_trials:
         src_espdl = experiments_dir / f"{args.study_name}-trial-{tn}.espdl"
@@ -471,6 +477,22 @@ def main() -> None:
             with open(preds_path, "w") as _f:
                 _json.dump(preds, _f, indent=2)
             print(f"    Predictions saved for trial #{tn}: {len(predictions)} samples")
+
+            # Compute MCU accuracy and update results entry
+            if len(predictions) == len(val_labels):
+                mcu_acc = np.mean(np.array(predictions) == val_labels) * 100.0
+                for entry in results:
+                    if entry["trial_number"] == tn:
+                        entry.pop("accuracy_drop", None)
+                        entry["mcu_accuracy"] = float(round(mcu_acc, 2))
+                        break
+                with open(results_path, "w") as _f:
+                    _json.dump(results, _f, indent=2)
+                print(f"    MCU accuracy: {mcu_acc:.2f} %")
+            else:
+                print(f"    WARNING: prediction count ({len(predictions)}) doesn't"
+                      f" match validation samples ({len(val_labels)}),"
+                      f" cannot compute MCU accuracy")
         else:
             print(f"    WARNING: no machine-readable predictions found in output")
         print()
