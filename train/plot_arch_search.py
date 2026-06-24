@@ -202,6 +202,7 @@ def create_pareto_front_plot(studies_data):
 def create_accuracy_comparison_plot(study_name, data):
     """
     Plot float_accuracy vs quantized_accuracy for all models in a results.json.
+    Also plots mcu_accuracy if available (on-device inference accuracy).
 
     Parameters
     ----------
@@ -218,21 +219,43 @@ def create_accuracy_comparison_plot(study_name, data):
         print(f"  No valid accuracy entries found for {study_name}.")
         return
 
+    has_mcu = any(not np.isnan(d.get("mcu_accuracy", np.nan)) for d in data)
+
     trial_labels = [str(d["trial_number"]) for d in data]
     x = np.arange(len(data))
-    width = 0.35
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    if has_mcu:
+        width = 0.25
+        fig, ax = plt.subplots(figsize=(12, 5))
 
-    bars_float = ax.bar(x - width / 2, [d["float_accuracy"] for d in data],
-                        width, label="Float Accuracy", color="#4C9BE8", edgecolor="white")
-    bars_quant = ax.bar(x + width / 2, [d["quantized_accuracy"] for d in data],
-                        width, label="Quantized Accuracy", color="#E8834C", edgecolor="white")
+        bars_float = ax.bar(x - width, [d["float_accuracy"] for d in data],
+                            width, label="Float Accuracy", color="#4C9BE8", edgecolor="white")
+        bars_quant = ax.bar(x, [d["quantized_accuracy"] for d in data],
+                            width, label="Quantized Accuracy", color="#E8834C", edgecolor="white")
+
+        mcu_vals = []
+        for d in data:
+            v = d.get("mcu_accuracy", np.nan)
+            mcu_vals.append(v if not np.isnan(v) else 0.0)
+        bars_mcu = ax.bar(x + width, mcu_vals,
+                          width, label="MCU Accuracy", color="#4CAF50", edgecolor="white")
+
+        title = f"{study_name} — Float vs Quantized vs MCU Accuracy"
+    else:
+        width = 0.35
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        bars_float = ax.bar(x - width / 2, [d["float_accuracy"] for d in data],
+                            width, label="Float Accuracy", color="#4C9BE8", edgecolor="white")
+        bars_quant = ax.bar(x + width / 2, [d["quantized_accuracy"] for d in data],
+                            width, label="Quantized Accuracy", color="#E8834C", edgecolor="white")
+        bars_mcu = None
+
+        title = f"{study_name} — Float vs Quantized Accuracy"
 
     ax.set_ylabel("Accuracy (%)", fontsize=11)
-    ax.set_xlabel("Trial (sorted by float accuracy)", fontsize=11)
-    ax.set_title(f"{study_name} — Float vs Quantized Accuracy",
-                 fontsize=13, fontweight="bold")
+    ax.set_xlabel("Trial (sorted by quantized accuracy)", fontsize=11)
+    ax.set_title(title, fontsize=13, fontweight="bold")
     ax.set_xticks(x)
     ax.set_xticklabels(trial_labels, rotation=45, ha="right", fontsize=8)
     ax.set_ylim(0, 105)
@@ -250,6 +273,12 @@ def create_accuracy_comparison_plot(study_name, data):
         if h > 0:
             ax.text(bar.get_x() + bar.get_width() / 2, h + 0.5, f"{h:.1f}",
                     ha="center", va="bottom", fontsize=6)
+    if bars_mcu is not None:
+        for bar in bars_mcu:
+            h = bar.get_height()
+            if h > 0:
+                ax.text(bar.get_x() + bar.get_width() / 2, h + 0.5, f"{h:.1f}",
+                        ha="center", va="bottom", fontsize=6)
 
     fig.tight_layout()
     fig.savefig(fig_path(f"fig2_accuracy_{study_name}.png"), dpi=FIG_DPI)
