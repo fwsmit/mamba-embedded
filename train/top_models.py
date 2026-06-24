@@ -465,18 +465,13 @@ def main() -> None:
             f.write(f"stderr:\n{result.stderr}")
         print(f"    Output saved: {output_path}")
 
-        # Save predictions alongside results.json
+        # Save predictions to a per-trial JSON file
         if predictions:
             import json as _json
-            preds_path = experiments_dir / "predictions.json"
-            preds: dict = {}
-            if preds_path.exists():
-                with open(preds_path, "r") as _f:
-                    preds = _json.load(_f)
-            preds[str(tn)] = predictions
+            preds_path = experiments_dir / f"predictions_trial_{tn}.json"
             with open(preds_path, "w") as _f:
-                _json.dump(preds, _f, indent=2)
-            print(f"    Predictions saved for trial #{tn}: {len(predictions)} samples")
+                _json.dump(predictions, _f, indent=2)
+            print(f"    Predictions saved: {preds_path} ({len(predictions)} samples)")
 
             # Compute MCU accuracy and update results entry
             if len(predictions) == len(val_labels):

@@ -36,11 +36,20 @@ PYTHON="$IDF_PYTHON_ENV_PATH/bin/python"
 
 cp "$MODEL_PATH" "$SCRIPT_DIR/esp-dl/main/model/model.espdl"
 
-# Copy dataset.bin from the same directory, if present.
+# Copy the matching dataset-trial-<N>.bin as dataset.bin.
 # dataset.bin will be auto-flashed by idf.py flash via the CMake build system.
-DATASET_SRC="$(dirname "$MODEL_PATH")/dataset.bin"
-if [ -f "$DATASET_SRC" ]; then
+MODEL_BASENAME=$(basename "$MODEL_PATH")
+if [[ "$MODEL_BASENAME" =~ trial-([0-9]+)\.espdl$ ]]; then
+  TRIAL_NUM="${BASH_REMATCH[1]}"
+  DATASET_SRC="$(dirname "$MODEL_PATH")/dataset-trial-${TRIAL_NUM}.bin"
+  if [ ! -f "$DATASET_SRC" ]; then
+    echo "Error: dataset file not found: $DATASET_SRC" >&2
+    exit 1
+  fi
   cp "$DATASET_SRC" "$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
+else
+  echo "Error: model filename does not contain a trial number (expected *-trial-N.espdl): $MODEL_BASENAME" >&2
+  exit 1
 fi
 
 cd "$SCRIPT_DIR/esp-dl"

@@ -24,7 +24,7 @@ To build the ESP-DL firmware with a given quantized model, flash it to the devic
 
 This script:
 1. Copies the specified `.espdl` file to `esp-dl/main/model/model.espdl`
-2. Copies `dataset.bin` from the same directory if present
+2. Copies the matching `dataset-trial-<N>.bin` (inferred from the model filename) as `dataset.bin` — exits with an error if not found
 3. Sources the ESP-IDF v6.0.1 environment
 4. Runs `idf.py build` in `esp-dl/`
 5. Runs `idf.py flash` on `/dev/ttyACM0` (dataset partition is flashed automatically by the build system)
@@ -111,13 +111,13 @@ The dataset partition is integrated into the ESP-IDF build system: if `dataset.b
 
 To include a dataset:
 
-1. Place `dataset.bin` next to your `.espdl` model file (same directory)
-2. Run `./run-esp.sh` as normal — the build system handles flashing both the firmware and the dataset
+1. Place `dataset-trial-<N>.bin` next to your `*-trial-<N>.espdl` model file (same directory)
+2. Run `./run-esp.sh` as normal — the script automatically matches the trial number and copies it as `dataset.bin`; the build system handles flashing both the firmware and the dataset
 
 For manual testing (without `run-esp.sh`), just copy both files:
 ```bash
-cp path/to/model.espdl  esp-dl/main/model/
-cp path/to/dataset.bin  esp-dl/main/model/
+cp path/to/model.espdl      esp-dl/main/model/
+cp path/to/dataset-trial-N.bin  esp-dl/main/model/dataset.bin
 cd esp-dl
 idf.py build && idf.py -p /dev/ttyACM0 flash
 ```
