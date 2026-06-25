@@ -235,10 +235,11 @@ def create_pareto_front_plot(studies_data, title):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Figure 2 – Float vs Quantized Accuracy Comparison
 # ═══════════════════════════════════════════════════════════════════════════════
-def create_accuracy_comparison_plot(study_name, data, title):
+def create_accuracy_comparison_plot(study_name, data, title, show_mcu=False):
     """
     Plot float_accuracy vs quantized_accuracy for all models in a results.json.
-    Also plots mcu_accuracy if available (on-device inference accuracy).
+    Also plots mcu_accuracy if available (on-device inference accuracy) and
+    ``show_mcu`` is True.
 
     Parameters
     ----------
@@ -248,6 +249,8 @@ def create_accuracy_comparison_plot(study_name, data, title):
         Entries from results.json with float_accuracy and quantized_accuracy.
     title : str
         Used in the plot title and saved file names.
+    show_mcu : bool
+        If True, include MCU accuracy bars when MCU data exists.
     """
     # Filter out entries with NaN float_accuracy
     data = [d for d in data if not np.isnan(d.get("float_accuracy", np.nan))]
@@ -257,7 +260,7 @@ def create_accuracy_comparison_plot(study_name, data, title):
         print(f"  No valid accuracy entries found for {study_name}.")
         return
 
-    has_mcu = any(not np.isnan(d.get("mcu_accuracy", np.nan)) for d in data)
+    has_mcu = show_mcu and any(not np.isnan(d.get("mcu_accuracy", np.nan)) for d in data)
 
     trial_labels = [str(d["trial_number"]) for d in data]
     x = np.arange(len(data))
@@ -367,6 +370,10 @@ def main():
         "--show", action="store_true",
         help="Display the plot(s) on screen (default: only save to disk)."
     )
+    parser.add_argument(
+        "--mcu", action="store_true",
+        help="Include on-device MCU accuracy bars in the accuracy plot (default: off)."
+    )
     args = parser.parse_args()
 
     n = len(args.configs)
@@ -427,7 +434,7 @@ def main():
                 print(f"  Loading accuracy results from {results_path} …")
                 with open(results_path) as f:
                     results_data = json.load(f)
-                create_accuracy_comparison_plot(name, results_data, title)
+                create_accuracy_comparison_plot(name, results_data, title, show_mcu=args.mcu)
                 plot_created = True
             else:
                 print(f"  No results.json found at {results_path}, skipping.")
