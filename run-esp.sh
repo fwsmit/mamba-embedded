@@ -79,7 +79,7 @@ import serial, sys, time
 PORT     = sys.argv[1]
 VERBOSE  = len(sys.argv) > 2 and sys.argv[2] == "true"
 BAUD     = 115200
-TIMEOUT_S = 600
+TIMEOUT_S = 3000
 OK_SENTINELS   = ["INFERENCE_OK"]
 FAIL_SENTINELS = ["INFERENCE_OOM", "INFERENCE_FAIL"]
 CRASH_MARKERS  = ["Guru Meditation Error", "abort() was called", "Backtrace:", "rst:0x"]

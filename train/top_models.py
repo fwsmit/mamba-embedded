@@ -215,6 +215,27 @@ def parse_predictions(stdout: str) -> list[int]:
     return predictions
 
 
+def parse_latency(stdout: str) -> float | None:
+    """
+    Extract the average single-inference latency (in microseconds) from the
+    firmware's stdout.
+
+    The firmware outputs a line like:
+        I (1037) mamba_har: Average single-inference latency: 8172.1 us (8.172 ms).
+
+    Returns the latency in microseconds (e.g., 8172.1), or None if not found.
+    """
+    import re
+
+    match = re.search(
+        r"Average single-inference latency:\s*([\d.]+)\s*us",
+        stdout,
+    )
+    if match:
+        return float(match.group(1))
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Step functions
 # ---------------------------------------------------------------------------
@@ -478,6 +499,20 @@ def deploy_trial(
                   f" cannot compute MCU accuracy")
     else:
         print(f"    WARNING: no machine-readable predictions found in output")
+
+    print("Parsing latency")
+    latency_us = parse_latency(result.stdout)
+    if latency_us is not None:
+        for entry in results:
+            if entry["trial_number"] == trial_number:
+                entry["mcu_latency_us"] = float(round(latency_us, 1))
+                break
+        results_path = experiments_dir / "results.json"
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"    MCU latency: {latency_us:.1f} us ({latency_us / 1000:.3f} ms)")
+    else:
+        print(f"    WARNING: latency line not found in firmware output")
     print()
 
 
