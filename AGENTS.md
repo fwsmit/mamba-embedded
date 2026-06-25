@@ -73,6 +73,7 @@ EPOCHS: 2
 MODEL: mamba-1          # "mamba-1" or "mamba-3"
 DATASET: kws            # "kws" or "har"
 EXPERIMENT_NAME: "v2"   # distinguishes this experiment in the Optuna study name
+plot_description: "Mamba-1 baseline"  # optional; label used in Pareto front plots
 
 SEARCH_SPACE:
   d_model:
@@ -93,6 +94,8 @@ SEARCH_SPACE:
 ```
 
 The `SEARCH_SPACE` section defines the Optuna `suggest_*` ranges for each model parameter. For integer parameters without a step, only `low`/`high` are needed. For categorical parameters, use `choices` (e.g. `nheads: {choices: [1, 2, 4, 8]}`). For parameters with a step, add `step` (e.g. `d_model: {low: 8, high: 32, step: 4}`). Only the parameters relevant to the chosen model type are used (`mamba-1` ignores `nheads`).
+
+The optional `plot_description` field sets a custom label for this config in Pareto front comparison plots (see `train/plot_arch_search.py`). If omitted, the plot falls back to the auto-generated study name (`{MODEL}-{DATASET}-{EXPERIMENT_NAME}`).
 
 Results are stored in an Optuna SQLite database (`mamba_hpo.db`) and ONNX files in `~/Models/<MODEL>-<DATASET>-<EXPERIMENT_NAME>/`.
 

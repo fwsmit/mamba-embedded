@@ -11,6 +11,7 @@ EXPERIMENT_NAME: "bidir"
 bidirectional: true
 bidirectional_strategy: add
 n_trials: 149
+plot_description: "bidirectional (add)"
 
 SEARCH_SPACE:
   d_model:

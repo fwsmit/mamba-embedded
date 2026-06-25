@@ -9,6 +9,7 @@ MODEL: mamba-1
 DATASET: kws
 EXPERIMENT_NAME: "2"
 n_trials: 100
+plot_description: "single direction"
 
 SEARCH_SPACE:
   d_model:

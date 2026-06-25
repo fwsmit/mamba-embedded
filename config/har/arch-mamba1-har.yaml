@@ -10,6 +10,7 @@ DATASET: har
 EXPERIMENT_NAME: ""
 bidirectional: false
 n_trials: 149
+plot_description: "single direction"
 
 SEARCH_SPACE:
   d_model:

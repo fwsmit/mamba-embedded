@@ -11,6 +11,7 @@ EXPERIMENT_NAME: "bidir-mul"
 bidirectional: true
 bidirectional_strategy: ew_multiply
 n_trials: 100
+plot_description: "bidirectional (add)"
 
 SEARCH_SPACE:
   d_model:

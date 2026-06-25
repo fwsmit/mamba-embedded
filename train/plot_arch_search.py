@@ -5,6 +5,8 @@ Pareto front and supporting analysis plots for N multi-objective studies.
 Usage:
   python plot_arch_search.py config/arch-mamba1-kws.yaml config/arch-mamba1-kws-multi.yaml
   python plot_arch_search.py config/a.yaml config/b.yaml config/c.yaml config/d.yaml
+  python plot_arch_search.py --plot pareto config/arch-mamba1-kws.yaml config/arch-mamba1-kws-multi.yaml
+  python plot_arch_search.py --plot accuracy config/arch-mamba1-kws.yaml
 """
 
 import argparse
@@ -15,12 +17,14 @@ import matplotlib.pyplot as plt
 from matplotlib import ticker
 import matplotlib.gridspec as gridspec
 from matplotlib.lines import Line2D
+from matplotlib.legend_handler import HandlerBase
 import pandas as pd
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from omegaconf import OmegaConf
 import os
 import json
+import re
 from pathlib import Path
 import warnings
 
@@ -52,6 +56,32 @@ ALPHA_PARETO = 0.95
 MARKER_ALL   = "o"
 MARKER_PAR   = "D"
 FIG_DPI      = 150
+
+
+class _TwoMarkerProxy:
+    """Proxy artist carrying the two colours for a combined legend entry."""
+    def __init__(self, color_base, color_par):
+        self.color_base = color_base
+        self.color_par = color_par
+
+
+class _TwoMarkerHandler(HandlerBase):
+    """Legend handler that draws two markers side-by-side in one entry."""
+    def create_artists(
+        self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans
+    ):
+        cx1 = width * 0.25
+        cx2 = width * 0.65
+        cy  = height * 0.5
+
+        return [
+            Line2D([cx1], [cy], marker=MARKER_ALL, color="w",
+                   markerfacecolor=orig_handle.color_base, alpha=ALPHA_ALL,
+                   markersize=7, transform=trans),
+            Line2D([cx2], [cy], marker=MARKER_PAR, color="w",
+                   markerfacecolor=orig_handle.color_par, markeredgecolor="white",
+                   markeredgewidth=0.6, markersize=9, transform=trans),
+        ]
 
 
 # ── Load studies ──────────────────────────────────────────────────────────────
@@ -92,7 +122,15 @@ def pareto_mask(df):
 # ═══════════════════════════════════════════════════════════════════════════════
 # Figure 1 – Pareto Front Comparison  (main money plot)
 # ═══════════════════════════════════════════════════════════════════════════════
-def create_pareto_front_plot(studies_data):
+def slugify(text: str) -> str:
+    """Convert text to a filesystem-safe slug."""
+    s = text.lower().strip()
+    s = re.sub(r"[^a-z0-9 _-]", "", s)
+    s = re.sub(r"[ _]+", "-", s)
+    return s
+
+
+def create_pareto_front_plot(studies_data, title):
     """
     Plot and save the Pareto front comparison figure for N studies.
 
@@ -101,6 +139,8 @@ def create_pareto_front_plot(studies_data):
     studies_data : list of dict
         Each dict has keys: 'name', 'df', 'par' (Pareto-sorted DataFrame),
         'color' (base), 'color_par' (Pareto highlight), 'idx' (int).
+    title : str
+        Used in the plot title and saved file names.
     """
     n_studies = len(studies_data)
 
@@ -138,21 +178,17 @@ def create_pareto_front_plot(studies_data):
         ax.set_yticks(np.arange(0.80, 1.001, 0.02))
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
 
-    # ── Build legend ──────────────────────────────────────────────────────────
+    # ── Build legend — one entry per study, two markers side-by-side ─────────
     legend_elements = []
     for sd in studies_data:
         legend_elements.append(
-            Line2D([0], [0], marker=MARKER_PAR, color="w",
-                   markerfacecolor=sd["color_par"], markersize=9,
-                   label=f"{sd['name']} — Pareto front")
-        )
-        legend_elements.append(
-            Line2D([0], [0], marker=MARKER_ALL, color="w",
-                   markerfacecolor=sd["color"], markersize=7, alpha=0.7,
-                   label=f"{sd['name']} — all trials")
+            _TwoMarkerProxy(sd["color"], sd["color_par"])
         )
 
-    ax.legend(handles=legend_elements, framealpha=0.9, fontsize=9)
+    ax.legend(handles=legend_elements,
+              labels=[sd["name"] for sd in studies_data],
+              handler_map={_TwoMarkerProxy: _TwoMarkerHandler()},
+              framealpha=0.9, fontsize=9)
 
     # ── Frame x-axis around the Pareto front with padding ────────────────────
     all_par_lat = np.concatenate([sd["par"]["latency"].values for sd in studies_data])
@@ -186,20 +222,20 @@ def create_pareto_front_plot(studies_data):
     ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
 
     n_studies = len(studies_data)
-    title_suffix = " vs ".join(sd["name"] for sd in studies_data)
-    ax.set_title(f"HPO Pareto front comparison: {title_suffix}",
+    ax.set_title(f"{title}",
                  fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
     fig1.tight_layout()
-    fig1.savefig(fig_path("fig1_pareto_front.png"), dpi=FIG_DPI)
-    fig1.savefig(fig_path("fig1_pareto_front.pdf"))
-    print("Saved figures/fig1_pareto_front.png and fig1_pareto_front.pdf")
+    slug = slugify(title)
+    fig1.savefig(fig_path(f"pareto_{slug}.png"), dpi=FIG_DPI)
+    fig1.savefig(fig_path(f"pareto_{slug}.pdf"))
+    print(f"Saved figures/pareto_{slug}.png and pareto_{slug}.pdf")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Figure 2 – Float vs Quantized Accuracy Comparison
 # ═══════════════════════════════════════════════════════════════════════════════
-def create_accuracy_comparison_plot(study_name, data):
+def create_accuracy_comparison_plot(study_name, data, title):
     """
     Plot float_accuracy vs quantized_accuracy for all models in a results.json.
     Also plots mcu_accuracy if available (on-device inference accuracy).
@@ -210,6 +246,8 @@ def create_accuracy_comparison_plot(study_name, data):
         Name of the study (used for figure title and filename).
     data : list of dict
         Entries from results.json with float_accuracy and quantized_accuracy.
+    title : str
+        Used in the plot title and saved file names.
     """
     # Filter out entries with NaN float_accuracy
     data = [d for d in data if not np.isnan(d.get("float_accuracy", np.nan))]
@@ -240,7 +278,7 @@ def create_accuracy_comparison_plot(study_name, data):
         bars_mcu = ax.bar(x + width, mcu_vals,
                           width, label="MCU Accuracy", color="#4CAF50", edgecolor="white")
 
-        title = f"{study_name} — Float vs Quantized vs MCU Accuracy"
+        title = f"{title}"
     else:
         width = 0.35
         fig, ax = plt.subplots(figsize=(10, 5))
@@ -251,7 +289,7 @@ def create_accuracy_comparison_plot(study_name, data):
                             width, label="Quantized Accuracy", color="#E8834C", edgecolor="white")
         bars_mcu = None
 
-        title = f"{study_name} — Float vs Quantized Accuracy"
+        title = f"{title}"
 
     ax.set_ylabel("Accuracy (%)", fontsize=11)
     ax.set_xlabel("Trial (sorted by quantized accuracy)", fontsize=11)
@@ -281,15 +319,30 @@ def create_accuracy_comparison_plot(study_name, data):
                         ha="center", va="bottom", fontsize=6)
 
     fig.tight_layout()
-    fig.savefig(fig_path(f"fig2_accuracy_{study_name}.png"), dpi=FIG_DPI)
-    fig.savefig(fig_path(f"fig2_accuracy_{study_name}.pdf"))
-    print(f"  Saved figures/fig2_accuracy_{study_name}.png and .pdf")
+    slug = slugify(title)
+    fig.savefig(fig_path(f"accuracy_{slug}.png"), dpi=FIG_DPI)
+    fig.savefig(fig_path(f"accuracy_{slug}.pdf"))
+    print(f"  Saved figures/accuracy_{slug}.png and .pdf")
 
 
 def study_name_from_config(config_path: str) -> str:
     """Load a Hydra config YAML and return the corresponding Optuna study name."""
     cfg = OmegaConf.load(config_path)
     return f"{cfg.MODEL}-{cfg.DATASET}-{cfg.EXPERIMENT_NAME}" if cfg.get("EXPERIMENT_NAME") else f"{cfg.MODEL}-{cfg.DATASET}"
+
+
+def load_study_meta(config_path: str) -> dict:
+    """Load a Hydra config YAML and return metadata: study_name, display_name.
+
+    The display name is set from the optional ``plot_description`` field in the
+    config file (useful for giving configs clearer labels in Pareto front plots
+    when comparing multiple experiments). Falls back to the auto-generated study
+    name if ``plot_description`` is not present.
+    """
+    cfg = OmegaConf.load(config_path)
+    study_name = study_name_from_config(config_path)
+    display_name = cfg.get("plot_description") or study_name
+    return {"study_name": study_name, "display_name": display_name}
 
 
 def main():
@@ -299,6 +352,20 @@ def main():
     parser.add_argument(
         "configs", nargs="+",
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
+    )
+    parser.add_argument(
+        "--plot", "-p", choices=["pareto", "accuracy"], required=True,
+        help="Which plot to create: 'pareto' (Pareto front comparison) or "
+             "'accuracy' (float vs quantized accuracy per study)."
+    )
+    parser.add_argument(
+        "--title", type=str, default=None,
+        help="Title of the plot and base name for saved files. "
+             "If not provided, derived from the study names."
+    )
+    parser.add_argument(
+        "--show", action="store_true",
+        help="Display the plot(s) on screen (default: only save to disk)."
     )
     args = parser.parse_args()
 
@@ -312,12 +379,21 @@ def main():
 
     repo_root = Path(__file__).resolve().parent.parent
 
+    # ── Derive title if not provided ─────────────────────────────────────────
+    title = args.title or " vs ".join(
+        study_name_from_config(cp) for cp in args.configs
+    )
+
     # ── Gather study data ─────────────────────────────────────────────────────
     studies_data = []
     for i, config_path in enumerate(args.configs):
-        name = study_name_from_config(config_path)
+        meta = load_study_meta(config_path)
+        name = meta["study_name"]
+        display_name = meta["display_name"]
         color_base, color_par = COLORS[i % len(COLORS)]
         print(f"Study {i+1}: {name}  (from {config_path})  → colour {color_base}")
+        if display_name != name:
+            print(f"  → Plot label: {display_name}")
 
         print("  Loading study …")
         study = load_study(name)
@@ -330,7 +406,8 @@ def main():
         print(f"  {name}: {len(df)} trials, {len(par)} Pareto-optimal")
 
         studies_data.append({
-            "name": name,
+            "name": display_name,
+            "study_name": name,
             "df": df,
             "par": par,
             "color": color_base,
@@ -338,24 +415,36 @@ def main():
             "idx": i,
         })
 
+    # ── Create the requested plot ───────────────────────────────────────────
+    plot_created = False
+
+    if args.plot == "accuracy":
         # ── Accuracy comparison (inferred from config) ────────────────────────
-        results_path = repo_root / "experiments" / name / "results.json"
-        if results_path.exists():
-            print(f"  Loading accuracy results from {results_path} …")
-            with open(results_path) as f:
-                results_data = json.load(f)
-            create_accuracy_comparison_plot(name, results_data)
-        else:
-            print(f"  No results.json found at {results_path}, skipping accuracy plot.")
+        for sd in studies_data:
+            name = sd["name"]
+            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
+            if results_path.exists():
+                print(f"  Loading accuracy results from {results_path} …")
+                with open(results_path) as f:
+                    results_data = json.load(f)
+                create_accuracy_comparison_plot(name, results_data, title)
+                plot_created = True
+            else:
+                print(f"  No results.json found at {results_path}, skipping.")
 
-    # ── Pareto front plot ────────────────────────────────────────────────────
-    if n > 1:
-        create_pareto_front_plot(studies_data)
+    elif args.plot == "pareto":
+        # ── Pareto front plot ────────────────────────────────────────────────
+        create_pareto_front_plot(studies_data, title)
+        plot_created = True
+
+    if not plot_created:
+        print("\nNo plots created.")
     else:
-        print("\nOnly one study provided — skipping Pareto front comparison.")
-
-    print("\nAll figures saved. Done.")
-    plt.show()
+        print("\nAll requested figures saved.")
+    if args.show:
+        plt.show()
+    else:
+        plt.close("all")
 
 
 if __name__ == "__main__":
