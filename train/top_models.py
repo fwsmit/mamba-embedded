@@ -448,9 +448,30 @@ def deploy_trial(
     val_labels: np.ndarray,
 ) -> None:
     """Run the quantized model on ESP32-S3 and parse its output predictions."""
+    run_on_mcu(trial_number, study_name, experiments_dir, run_script)
+    parse_mcu_output(trial_number, experiments_dir, results, val_labels)
+
+
+def run_on_mcu(
+    trial_number: int,
+    study_name: str,
+    experiments_dir: Path,
+    run_script: Path,
+) -> None:
+    """Run the quantized model on ESP32-S3 and save the raw output.
+
+    Skips execution if the .output file already exists (indicating a
+    previous successful run). Parsing of the saved output is done
+    separately by parse_mcu_output().
+    """
     src_espdl = experiments_dir / f"{study_name}-trial-{trial_number}.espdl"
     if not src_espdl.exists():
         print(f"  WARNING: .espdl file not found, skipping trial #{trial_number}: {src_espdl}")
+        return
+
+    output_path = src_espdl.with_suffix(".output")
+    if output_path.exists():
+        print(f"  Trial #{trial_number}: output already exists at {output_path}, skipping MCU run\n")
         return
 
     print(f"  Trial #{trial_number}: {src_espdl.name}")
@@ -467,14 +488,38 @@ def deploy_trial(
     if result.stderr:
         print(f"    stderr:\n{result.stderr}")
 
-    predictions = parse_predictions(result.stdout)
-
-    output_path = src_espdl.with_suffix(".output")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
         f.write(f"Exit code: {result.returncode}\n")
         f.write(f"stdout:\n{result.stdout}")
         f.write(f"stderr:\n{result.stderr}")
     print(f"    Output saved: {output_path}")
+    print()
+
+
+def parse_mcu_output(
+    trial_number: int,
+    experiments_dir: Path,
+    results: list[dict],
+    val_labels: np.ndarray,
+) -> None:
+    """Read the saved .output file from a previous MCU run, parse
+    predictions and latency, and update *results* in-place.
+
+    This runs every time (no caching) so that results.json always
+    reflects the latest parsing logic.
+    """
+    output_candidates = list(experiments_dir.glob(f"*-trial-{trial_number}.output"))
+    if not output_candidates:
+        print(f"  WARNING: no .output file found for trial #{trial_number}, skipping parse")
+        return
+    output_path = output_candidates[0]
+
+    print(f"  Trial #{trial_number}: parsing {output_path}")
+    with open(output_path, "r") as f:
+        output_text = f.read()
+
+    predictions = parse_predictions(output_text)
 
     if predictions:
         preds_path = experiments_dir / f"predictions_trial_{trial_number}.json"
@@ -501,7 +546,7 @@ def deploy_trial(
         print(f"    WARNING: no machine-readable predictions found in output")
 
     print("Parsing latency")
-    latency_us = parse_latency(result.stdout)
+    latency_us = parse_latency(output_text)
     if latency_us is not None:
         for entry in results:
             if entry["trial_number"] == trial_number:
@@ -569,23 +614,23 @@ def process_study(
     # Deploy each quantized model to ESP32-S3
     print()
     print("=" * 62)
-    print(f"  DEPLOYING TO ESP32-S3 — {study_name}")
+    print(f"  RUNNING ON ESP32-S3 — {study_name}")
     print("=" * 62)
     print()
 
     for tn in selected_trials:
-        # Check if deploy already done (mcu_accuracy present)
-        deploy_done = any(
-            entry["trial_number"] == tn and "mcu_accuracy" in entry
-            for entry in results
-        )
-        if deploy_done:
-            print(f"  Trial #{tn}: already deployed, skipping\n")
-            continue
-        deploy_trial(tn, study_name, experiments_dir, run_script,
-                     results, val_labels)
+        run_on_mcu(tn, study_name, experiments_dir, run_script)
 
-    print("All selected models deployed.")
+    print()
+    print("=" * 62)
+    print(f"  PARSING MCU OUTPUT — {study_name}")
+    print("=" * 62)
+    print()
+
+    for tn in selected_trials:
+        parse_mcu_output(tn, experiments_dir, results, val_labels)
+
+    print("All selected models processed.")
 
 
 
