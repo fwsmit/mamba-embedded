@@ -372,6 +372,64 @@ def _get_elem_size(data_type: int) -> int:
     return type_size.get(data_type, 4)
 
 
+def get_espdl_param_size(info_path: Path) -> int:
+    """
+    Compute the total parameter size (in bytes) from an ESP-DL .info file.
+
+    Parses the ``initializers (...)`` section and sums element counts times
+    their data-type sizes.
+
+    Returns 0 if the file does not exist or cannot be parsed.
+    """
+    if not info_path.exists():
+        return 0
+
+    info_text = info_path.read_text()
+    init_start = info_text.find("initializers (")
+    if init_start == -1:
+        return 0
+
+    init_end = info_text.find(")", init_start)
+    init_section = info_text[init_start:init_end]
+
+    dtype_size = {
+        "INT8": 1, "UINT8": 1,
+        "INT16": 2, "UINT16": 2,
+        "INT32": 4, "UINT32": 4,
+        "INT64": 8, "UINT64": 8,
+        "FLOAT": 4, "FLOAT16": 2, "BFLOAT16": 2,
+        "DOUBLE": 8,
+        "BOOL": 1,
+    }
+
+    param_size = 0
+    for line in init_section.split("\n"):
+        line = line.strip()
+        if not line or line == "initializers (":
+            continue
+        if line.startswith("%"):
+            line = line[1:]
+        bracket = line.find("[")
+        if bracket == -1:
+            continue
+        rest = line[bracket + 1:-1]
+        parts = rest.split(", ", 1)
+        if len(parts) != 2:
+            continue
+        dtype = parts[0]
+        shape_str = parts[1]
+        if shape_str == "scalar":
+            num_elements = 1
+        else:
+            dims = [int(d) for d in shape_str.split("x")]
+            num_elements = 1
+            for d in dims:
+                num_elements *= d
+        param_size += num_elements * dtype_size.get(dtype, 1)
+
+    return param_size
+
+
 def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
     """
     Report model file sizes, split by parameters and graph overhead.
@@ -429,48 +487,7 @@ def report_model_sizes(onnx_path: Path, espdl_path: Path, repo_root: Path):
         header_overhead = 16  # 4 magic + 4 mode + 4 size + 4 padding
         trailing_pad = total - header_overhead - flatbuf_size
 
-        # Parse .info for initializer sizes
-        espdl_param_size = 0
-        if info_file.exists():
-            info_text = info_file.read_text()
-            init_start = info_text.find("initializers (")
-            if init_start != -1:
-                init_end = info_text.find(")", init_start)
-                init_section = info_text[init_start:init_end]
-
-                dtype_size = {
-                    "INT8": 1, "UINT8": 1,
-                    "INT16": 2, "UINT16": 2,
-                    "INT32": 4, "UINT32": 4,
-                    "INT64": 8, "UINT64": 8,
-                    "FLOAT": 4, "FLOAT16": 2, "BFLOAT16": 2,
-                    "DOUBLE": 8,
-                    "BOOL": 1,
-                }
-
-                for line in init_section.split("\n"):
-                    line = line.strip()
-                    if not line or line == "initializers (":
-                        continue
-                    if line.startswith("%"):
-                        line = line[1:]
-                    bracket = line.find("[")
-                    if bracket == -1:
-                        continue
-                    rest = line[bracket + 1:-1]
-                    parts = rest.split(", ", 1)
-                    if len(parts) != 2:
-                        continue
-                    dtype = parts[0]
-                    shape_str = parts[1]
-                    if shape_str == "scalar":
-                        num_elements = 1
-                    else:
-                        dims = [int(d) for d in shape_str.split("x")]
-                        num_elements = 1
-                        for d in dims:
-                            num_elements *= d
-                    espdl_param_size += num_elements * dtype_size.get(dtype, 1)
+        espdl_param_size = get_espdl_param_size(info_file)
 
         espdl_graph_overhead = flatbuf_size - espdl_param_size
 
