@@ -257,19 +257,7 @@ def create_mcu_pareto_plot(studies_data, title):
                 if visible_pts:
                     lat_vals    = [p[0] for p in visible_pts]
                     mcu_acc_vals = [p[1] for p in visible_pts]
-                    float_acc_vals = [p[2] for p in visible_pts]
 
-                    # Draw a vertical line from float accuracy to MCU accuracy for each trial
-                    for lat, float_acc, mcu_acc in zip(lat_vals, float_acc_vals, mcu_acc_vals):
-                        ax_mcu.plot([lat, lat], [float_acc / 100.0, mcu_acc / 100.0],
-                                    color=sd["color_par"], alpha=0.4, linewidth=1.2,
-                                    linestyle="-", zorder=2)
-
-                    # Plot float accuracy as fainter crosses at the same MCU latency
-                    ax_mcu.scatter(lat_vals, [a / 100.0 for a in float_acc_vals],
-                                   color=sd["color_par"], alpha=0.35, s=50,
-                                   marker="x", linewidths=1.2,
-                                   zorder=3, label=f"{sd['name']} float")
                     # Plot MCU accuracy as filled circles
                     ax_mcu.scatter(lat_vals, [a / 100.0 for a in mcu_acc_vals],
                                    color=sd["color_par"], alpha=0.9, s=70,
@@ -309,16 +297,13 @@ def create_mcu_pareto_plot(studies_data, title):
     mcu_legend_labels = []
     for sd in studies_data:
         if sd.get("results_data"):
-            mcu_legend_handles.extend([
-                Line2D([0], [0], marker="x", color="w", markerfacecolor=sd["color_par"],
-                       markeredgecolor=sd["color_par"], alpha=0.35, markersize=7),
+            mcu_legend_handles.append(
                 Line2D([0], [0], marker="o", color="w", markerfacecolor=sd["color_par"],
                        markeredgecolor="white", markeredgewidth=0.6, markersize=8),
-            ])
-            mcu_legend_labels.extend([
-                f"{sd['name']} Float Acc.",
+            )
+            mcu_legend_labels.append(
                 f"{sd['name']} MCU Acc.",
-            ])
+            )
     if mcu_legend_handles:
         ax_mcu.legend(handles=mcu_legend_handles, labels=mcu_legend_labels,
                       framealpha=0.9, fontsize=8)
@@ -423,6 +408,157 @@ def create_profiling_plot(study_name, config_path, trial_number, title):
     fig.savefig(fig_pdf_path(f"profiling_{slug}.pdf"))
     print(f"Saved figures/profiling_{slug}.png and figures/pdf/profiling_{slug}.pdf")
     return True
+
+
+def create_quantization_loss_plot(studies_data, title):
+    """
+    Compare quantization loss (float_accuracy - quantized_accuracy) across multiple studies.
+
+    Generates a two-panel figure:
+    - Left panel: Grouped bar chart showing mean quantization loss per study with
+      individual trial points overlaid as a strip plot.
+    - Right panel: Float vs quantized accuracy scatter plot (one point per trial)
+      annotated with the diagonal (no loss) and a trend line per study.
+
+    Parameters
+    ----------
+    studies_data : list of dict
+        Each dict has keys: 'name', 'study_name', 'results_data' (list of entries
+        from results.json with ``float_accuracy`` and ``quantized_accuracy``),
+        'color', 'color_par', 'idx'.
+    title : str
+        Used in the plot title and saved file names.
+    """
+    fig = plt.figure(figsize=(14, 6))
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1.2])
+    ax_loss = fig.add_subplot(gs[0])
+    ax_scatter = fig.add_subplot(gs[1])
+
+    # ── Collect per-study losses ────────────────────────────────────────────
+    study_losses = []      # list of lists of loss values per study
+    study_means = []       # mean loss per study
+    study_stds = []        # std loss per study
+    valid_studies = []     # studies with data
+
+    for sd in studies_data:
+        if not sd.get("results_data"):
+            continue
+        losses = []
+        for rd in sd["results_data"]:
+            fa = rd.get("float_accuracy", np.nan)
+            qa = rd.get("quantized_accuracy", np.nan)
+            if not np.isnan(fa) and not np.isnan(qa):
+                losses.append(fa - qa)
+        if not losses:
+            continue
+        study_losses.append(losses)
+        study_means.append(np.mean(losses))
+        study_stds.append(np.std(losses))
+        valid_studies.append(sd)
+
+    if not valid_studies:
+        print("  No quantization loss data found across any study.")
+        ax_loss.text(0.5, 0.5, "No data available", ha="center", va="center",
+                     transform=ax_loss.transAxes, fontsize=14, color="gray")
+        fig.tight_layout()
+        slug = slugify(title)
+        fig.savefig(fig_path(f"quant_loss_{slug}.png"), dpi=FIG_DPI)
+        fig.savefig(fig_pdf_path(f"quant_loss_{slug}.pdf"))
+        print(f"Saved figures/quant_loss_{slug}.png")
+        return
+
+    n_studies = len(valid_studies)
+    x_pos = np.arange(n_studies)
+
+    # ── Left panel: Bar chart of mean loss + individual points ────────────
+    colors_bar = [sd["color_par"] for sd in valid_studies]
+    bars = ax_loss.bar(x_pos, study_means, width=0.55,
+                       color=colors_bar, edgecolor="white", linewidth=0.8,
+                       alpha=0.85, zorder=3)
+
+    # Error bars (std)
+    ax_loss.errorbar(x_pos, study_means, yerr=study_stds,
+                     fmt="none", ecolor="gray", capsize=4, capthick=1.2,
+                     elinewidth=1.2, zorder=4)
+
+    # Strip plot: individual trial losses overlaid
+    for i, losses in enumerate(study_losses):
+        # Jitter for visibility
+        jitter = np.random.default_rng(42).uniform(-0.12, 0.12, size=len(losses))
+        ax_loss.scatter(x_pos[i] + jitter, losses,
+                        color=valid_studies[i]["color"], alpha=0.6, s=30,
+                        marker="o", edgecolors="white", linewidths=0.3,
+                        zorder=5)
+
+    ax_loss.set_xticks(x_pos)
+    ax_loss.set_xticklabels([sd["name"] for sd in valid_studies],
+                            rotation=30, ha="right", fontsize=9)
+    ax_loss.set_ylabel("Quantization Loss (float \u2212 quantized, %)", fontsize=11)
+    ax_loss.set_title("Quantization Loss per Study", fontsize=12, fontweight="bold")
+    ax_loss.grid(axis="y", alpha=0.3, linestyle="--")
+
+    # Annotate bars with mean value
+    for bar, mean_val in zip(bars, study_means):
+        ax_loss.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                     f"{mean_val:.1f}%", ha="center", va="bottom",
+                     fontsize=8, fontweight="bold")
+
+    # Extend y-axis a bit for annotation headroom
+    all_losses = [l for subl in study_losses for l in subl]
+    max_loss = max(all_losses) if all_losses else 1.0
+    ax_loss.set_ylim(0, max_loss * 1.4)
+
+    # ── Right panel: Float vs quantized accuracy scatter ─────────────────
+    for sd in valid_studies:
+        xs = []
+        ys = []
+        for rd in sd["results_data"]:
+            fa = rd.get("float_accuracy", np.nan)
+            qa = rd.get("quantized_accuracy", np.nan)
+            if not np.isnan(fa) and not np.isnan(qa):
+                xs.append(fa)
+                ys.append(qa)
+        if not xs:
+            continue
+
+        ax_scatter.scatter(xs, ys, color=sd["color_par"], alpha=0.7, s=40,
+                           marker="o", edgecolors="white", linewidths=0.4,
+                           zorder=3, label=sd["name"])
+
+        # Trend line (linear fit, y = m*x + b)
+        x_arr = np.array(xs)
+        y_arr = np.array(ys)
+        m, b = np.polyfit(x_arr, y_arr, 1)
+        x_fit = np.linspace(min(xs), max(xs), 100)
+        ax_scatter.plot(x_fit, m * x_fit + b, color=sd["color_par"],
+                        linewidth=1.5, linestyle="--", alpha=0.7, zorder=2)
+
+    # Diagonal (no loss)
+    diag_min = min(
+        min(rd.get("float_accuracy", 100) for sd in valid_studies for rd in sd["results_data"]),
+        min(rd.get("quantized_accuracy", 0) for sd in valid_studies for rd in sd["results_data"])
+    )
+    diag_max = 100.0
+    ax_scatter.plot([diag_min, diag_max], [diag_min, diag_max],
+                    color="gray", linewidth=1.0, linestyle=":",
+                    alpha=0.5, zorder=1, label="No loss (y=x)")
+
+    ax_scatter.set_xlabel("Float Accuracy (%)", fontsize=11)
+    ax_scatter.set_ylabel("Quantized Accuracy (%)", fontsize=11)
+    ax_scatter.set_title("Float vs Quantized Accuracy", fontsize=12, fontweight="bold")
+    ax_scatter.grid(True, alpha=0.3, linestyle="--")
+    ax_scatter.legend(fontsize=8, framealpha=0.9, loc="lower right")
+
+    # Equal aspect so the diagonal is at 45 degrees
+    ax_scatter.set_aspect("equal", adjustable="datalim")
+    ax_scatter.set_xlim(diag_min - 2, diag_max + 2)
+    ax_scatter.set_ylim(diag_min - 2, diag_max + 2)
+
+    fig.tight_layout()
+    slug = slugify(title)
+    fig.savefig(fig_path(f"quant_loss_{slug}.png"), dpi=FIG_DPI)
+    fig.savefig(fig_pdf_path(f"quant_loss_{slug}.pdf"))
+    print(f"Saved figures/quant_loss_{slug}.png and figures/pdf/quant_loss_{slug}.pdf")
 
 
 def create_latency_correlation_plot(studies_data, title):
@@ -762,12 +898,13 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto", "latency", "profiling"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto", "latency", "profiling", "quantization_loss"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot), "
-             "'latency' (PC latency vs MCU latency scatter plot), or "
-             "'profiling' (MCU operator profiling bar chart for a specific trial)."
+             "'latency' (PC latency vs MCU latency scatter plot), "
+             "'profiling' (MCU operator profiling bar chart for a specific trial), or "
+             "'quantization_loss' (quantization loss comparison across studies)."
     )
     parser.add_argument(
         "--title", type=str, default=None,
@@ -920,6 +1057,22 @@ def main():
                 sd["par"] = par
 
         create_pareto_front_plot(studies_data, title, use_mcu=args.use_mcu)
+        plot_created = True
+
+    elif args.plot == "quantization_loss":
+        # ── Quantization loss comparison across studies ────────────────────
+        for sd in studies_data:
+            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
+            if results_path.exists():
+                print(f"  Loading results from {results_path} …")
+                with open(results_path) as f:
+                    sd["results_data"] = json.load(f)
+                print(f"    → {len(sd['results_data'])} trials")
+            else:
+                print(f"  No results.json found at {results_path}, skipping {sd['name']}.")
+                sd["results_data"] = []
+
+        create_quantization_loss_plot(studies_data, title)
         plot_created = True
 
     elif args.plot == "profiling":

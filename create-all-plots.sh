@@ -7,15 +7,19 @@ cd "$(dirname "$0")"
 # Remove old plots before generating new ones
 rm -f figures/*.png figures/pdf/*.pdf
 
+# Quantization loss
+python -m train.plot_arch_search --plot quantization_loss config/kws/*
+python -m train.plot_arch_search --plot quantization_loss config/har/*
+
 # Profiling plot
 python train/plot_arch_search.py --plot profiling --trial 18 config/har/arch-mamba1-har-bidir-mul.yaml
 
 python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-2.yaml
-python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir.yaml
-python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir-mul.yaml
-python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har.yaml
-python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir.yaml
-python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir-mul.yaml
+# python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir.yaml
+# python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir-mul.yaml
+# python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har.yaml
+# python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir.yaml
+# python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir-mul.yaml
 
 python -m train.plot_arch_search --plot mcu_pareto config/kws/*
 python -m train.plot_arch_search --plot mcu_pareto config/har/*

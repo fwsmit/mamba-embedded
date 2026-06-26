@@ -171,13 +171,14 @@ python -m train.plot_arch_search --plot accuracy config/har/arch-mamba1-har.yaml
 python -m train.plot_arch_search --plot mcu_pareto config/har/arch-mamba1-har.yaml
 ```
 
-Three plot types are available:
+Four plot types are available:
 
 | `--plot` value | Description |
 |----------------|-------------|
 | `pareto` | Compares Pareto fronts of multiple experiments on PC latency vs accuracy |
 | `accuracy` | Bar chart comparing float vs quantized accuracy per trial (optionally with `--mcu` for MCU accuracy bars) |
 | `mcu_pareto` | Two-panel figure: (left) PC Pareto front with ★ markers for MCU-tested trials; (right) MCU accuracy vs MCU latency for those models, annotated with trial numbers |
+| `quantization_loss` | Two-panel figure comparing quantization loss across multiple studies: (left) bar chart of mean loss per study with individual trial points overlaid; (right) scatter plot of float vs quantized accuracy with trend lines and diagonal |
 
 All figures are saved to `figures/` as `.png` and `.pdf`.
 
