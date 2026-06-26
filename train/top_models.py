@@ -236,6 +236,61 @@ def parse_latency(stdout: str) -> float | None:
     return None
 
 
+def parse_profiling_table(stdout: str) -> dict[str, dict] | None:
+    """
+    Extract the grouped-by-type profiling table from the firmware's stdout.
+
+    The firmware outputs a table like:
+        +--------------------+-------+---------------+-------------+
+        |                     Grouped by type                     |
+        +--------------------+-------+---------------+-------------+
+        | type               | count | total latency | avg latency |
+        +--------------------+-------+---------------+-------------+
+        | Mul                |    27 |        2596us |        96us |
+        | MatMul             |     5 |        1869us |       373us |
+        ...
+        +--------------------+-------+---------------+-------------+
+
+    Returns a dict mapping operator type names to dicts with
+    "count" (int) and "total_latency_us" (int), or None if the table
+    is not found.
+    """
+    import re
+
+    # Find the table header
+    header_pattern = r"\|\s*type\s*\|\s*count\s*\|\s*total latency\s*\|\s*avg latency\s*\|"
+    header_match = re.search(header_pattern, stdout)
+    if not header_match:
+        return None
+
+    # Find the separator line after the header
+    after_header = stdout[header_match.end() :]
+    sep_match = re.search(r"\+-+" , after_header)
+    if not sep_match:
+        return None
+
+    # Now parse each data row until the closing separator
+    rows_start = header_match.end() + sep_match.end()
+    rows_text = stdout[rows_start:]
+
+    # Match rows like: | Mul                |    27 |        2596us |        96us |
+    row_pattern = re.compile(
+        r"\|\s+(\S[^|]*?)\s+\|\s+(\d+)\s+\|\s+(\d+)us\s+\|"
+    )
+
+    table: dict[str, dict] = {}
+    for row_match in row_pattern.finditer(rows_text):
+        op_type = row_match.group(1).strip()
+        count = int(row_match.group(2))
+        total_latency = int(row_match.group(3))
+        table[op_type] = {
+            "count": count,
+            "total_latency_us": total_latency,
+        }
+
+    return table if table else None
+
+
 # ---------------------------------------------------------------------------
 # Step functions
 # ---------------------------------------------------------------------------
@@ -558,6 +613,20 @@ def parse_mcu_output(
         print(f"    MCU latency: {latency_us:.1f} us ({latency_us / 1000:.3f} ms)")
     else:
         print(f"    WARNING: latency line not found in firmware output")
+
+    print("Parsing profiling table")
+    profiling = parse_profiling_table(output_text)
+    if profiling is not None:
+        for entry in results:
+            if entry["trial_number"] == trial_number:
+                entry["mcu_profiling"] = profiling
+                break
+        results_path = experiments_dir / "results.json"
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"    Profiling table: {len(profiling)} operator types parsed")
+    else:
+        print(f"    WARNING: profiling table not found in firmware output")
     print()
 
 
