@@ -136,6 +136,51 @@ The firmware logs the partition info at startup via `load_dataset()` in `app_mai
 - **`model->test()` crash**: Fixed by re-quantizing after fixing the `train/onnx.py` shadowing bug (renamed to `train/onnx_utils.py`). The current esp-ppq version correctly handles scalar-index Gather, so `fix_gather_output_shapes` fixes 0 ops — no longer needed.
 - **Garbage output scores**: The quantized model outputs `DATA_TYPE_INT8`. Fixed `app_main.cpp` to check `get_dtype()` and dequantize via `DL_SCALE(exponent)`.
 
+## Experiments Directory
+
+After training and quantizing models, MCU inference results are stored in `experiments/<STUDY_NAME>/`.
+
+Each study directory contains:
+
+| File | Purpose |
+|------|---------|
+| `results.json` | Aggregated results of all MCU-tested trials |
+| `<study>-trial-<N>.json` | Per-trial detailed inference output |
+| `predictions_trial_<N>.json` | Per-trial per-class predictions |
+
+The `results.json` file is a JSON array of objects, each with:
+
+| Field | Description |
+|-------|-------------|
+| `trial_number` | Optuna trial number (links to study DB) |
+| `float_accuracy` | Accuracy of the original float PyTorch model (%) |
+| `quantized_accuracy` | Accuracy after int8 quantization (on PC) (%) |
+| `mcu_accuracy` | Accuracy measured on ESP32-S3 (%) |
+| `mcu_latency_us` | Average inference latency on ESP32-S3 (µs) |
+| `mcu_profiling` | Dict of operator-level profiling breakdown (count and total latency per op type) |
+
+## Visualisation
+
+Pareto front comparison and accuracy plots are generated with `train/plot_arch_search.py`.
+
+```bash
+conda activate torch-pascal
+python -m train.plot_arch_search --plot pareto config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml
+python -m train.plot_arch_search --plot accuracy config/har/arch-mamba1-har.yaml
+python -m train.plot_arch_search --plot accuracy config/har/arch-mamba1-har.yaml --mcu   # includes MCU accuracy bars
+python -m train.plot_arch_search --plot mcu_pareto config/har/arch-mamba1-har.yaml
+```
+
+Three plot types are available:
+
+| `--plot` value | Description |
+|----------------|-------------|
+| `pareto` | Compares Pareto fronts of multiple experiments on PC latency vs accuracy |
+| `accuracy` | Bar chart comparing float vs quantized accuracy per trial (optionally with `--mcu` for MCU accuracy bars) |
+| `mcu_pareto` | Two-panel figure: (left) PC Pareto front with ★ markers for MCU-tested trials; (right) MCU accuracy vs MCU latency for those models, annotated with trial numbers |
+
+All figures are saved to `figures/` as `.png` and `.pdf`.
+
 ## Performance
 
 - **HAR inference latency**: ~11.4 ms on ESP32-S3 @ 240 MHz (measured via `esp_timer_get_time()`).

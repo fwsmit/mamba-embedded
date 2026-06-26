@@ -130,6 +130,174 @@ def slugify(text: str) -> str:
     return s
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Figure 3 – MCU Pareto Comparison  (PC Pareto front + MCU-tested highlights)
+# ═══════════════════════════════════════════════════════════════════════════════
+def create_mcu_pareto_plot(studies_data, title):
+    """
+    Plot PC Pareto front with MCU-tested models highlighted, plus a separate
+    panel showing MCU accuracy vs MCU latency for those models.
+
+    For each study, all PC trials are plotted faintly. Models that were selected
+    for MCU testing (found in ``results.json``) are highlighted with a star
+    marker. The companion panel plots those same models with their on-device
+    accuracy and latency.
+
+    Parameters
+    ----------
+    studies_data : list of dict
+        Each dict has keys: 'name', 'df', 'par', 'results_data' (list of entries
+        from results.json with ``mcu_accuracy`` and ``mcu_latency_us``),
+        'color', 'color_par', 'idx'.
+    title : str
+        Used in the plot title and saved file names.
+    """
+    fig = plt.figure(figsize=(14, 6))
+    gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1])
+    ax_pc = fig.add_subplot(gs[0])
+    ax_mcu = fig.add_subplot(gs[1])
+
+    legend_handles = []
+    legend_labels = []
+
+    for sd in studies_data:
+        # ── Left panel: PC Pareto front ──────────────────────────────────────
+        # All PC trials (faint)
+        ax_pc.scatter(sd["df"]["latency"], sd["df"]["accuracy"],
+                      color=sd["color"], alpha=ALPHA_ALL, s=22, marker=MARKER_ALL,
+                      zorder=2)
+
+        # Pareto-optimal points and step-line
+        ax_pc.scatter(sd["par"]["latency"], sd["par"]["accuracy"],
+                      color=sd["color_par"], alpha=ALPHA_PARETO, s=70,
+                      marker=MARKER_PAR, edgecolors="white", linewidths=0.6,
+                      zorder=4)
+        ax_pc.step(sd["par"]["latency"], sd["par"]["accuracy"],
+                   color=sd["color_par"], linewidth=1.8, where="post", zorder=3)
+
+        # MCU-tested trials highlighted with star marker
+        mcu_highlight_x = []
+        mcu_highlight_y = []
+        if sd.get("results_data"):
+            for rd in sd["results_data"]:
+                tn = rd["trial_number"]
+                match = sd["df"][sd["df"]["number"] == tn]
+                if len(match) > 0:
+                    mcu_highlight_x.append(match.iloc[0]["latency"])
+                    mcu_highlight_y.append(match.iloc[0]["accuracy"])
+
+        if mcu_highlight_x:
+            ax_pc.scatter(mcu_highlight_x, mcu_highlight_y,
+                          color=sd["color_par"], alpha=1.0, s=130,
+                          marker="*", edgecolors="red", linewidths=1.2,
+                          zorder=5, label=f"{sd['name']} MCU-tested")
+            handles_pc = [
+                Line2D([0], [0], marker=MARKER_ALL, color="w",
+                       markerfacecolor=sd["color"], alpha=ALPHA_ALL, markersize=7),
+                Line2D([0], [0], marker=MARKER_PAR, color="w",
+                       markerfacecolor=sd["color_par"], markeredgecolor="white",
+                       markeredgewidth=0.6, markersize=9),
+                Line2D([0], [0], marker="*", color="w",
+                       markerfacecolor=sd["color_par"], markeredgecolor="red",
+                       markeredgewidth=1.2, markersize=11),
+            ]
+            legend_handles.extend(handles_pc)
+            legend_labels.extend([f"{sd['name']} all", f"{sd['name']} Pareto", f"{sd['name']} MCU"])
+
+        # Extend Pareto step lines to plot edges
+        if len(sd["par"]) > 0:
+            first_x = sd["par"]["latency"].iloc[0]
+            first_y = sd["par"]["accuracy"].iloc[0]
+            last_x  = sd["par"]["latency"].iloc[-1]
+            last_y  = sd["par"]["accuracy"].iloc[-1]
+            xlim = ax_pc.get_xlim()
+            ylim = ax_pc.get_ylim()
+            ax_pc.plot([last_x, xlim[1]], [last_y, last_y],
+                       color=sd["color_par"], linewidth=1.8, zorder=3)
+            ax_pc.plot([first_x, first_x], [first_y, ylim[0]],
+                       color=sd["color_par"], linewidth=1.8, zorder=3)
+
+        # ── Right panel: MCU accuracy vs latency ─────────────────────────────
+        if sd.get("results_data"):
+            mcu_pts = []
+            for rd in sd["results_data"]:
+                mcu_acc = rd.get("mcu_accuracy", np.nan)
+                mcu_lat = rd.get("mcu_latency_us", np.nan)
+                if not np.isnan(mcu_acc) and not np.isnan(mcu_lat):
+                    mcu_pts.append((mcu_lat, mcu_acc, int(rd["trial_number"])))
+
+            if mcu_pts:
+                mcu_pts.sort(key=lambda x: x[0])  # sort by latency
+                lat_vals  = [p[0] for p in mcu_pts]
+                acc_vals  = [p[1] for p in mcu_pts]
+                trial_nrs = [p[2] for p in mcu_pts]
+
+                ax_mcu.scatter(lat_vals, acc_vals,
+                               color=sd["color_par"], alpha=0.9, s=70,
+                               marker="o", edgecolors="white", linewidths=0.6,
+                               zorder=4, label=sd["name"])
+                for x, y, tn in zip(lat_vals, acc_vals, trial_nrs):
+                    ax_mcu.annotate(str(tn), (x, y),
+                                    textcoords="offset points", xytext=(5, 5),
+                                    fontsize=7, color=sd["color_par"])
+
+    # ── Left panel decorations ───────────────────────────────────────────────
+    all_par_acc = np.concatenate([sd["par"]["accuracy"].values for sd in studies_data])
+    if len(all_par_acc) > 0:
+        lo_acc = all_par_acc.min()
+        total_range = 1.0 - lo_acc
+        pad_acc = total_range * 0.2 if total_range > 0 else 0.01
+        bot = max(0.0, lo_acc - pad_acc)
+        ax_pc.set_ylim(bot, 1.0)
+        tick_start = np.ceil(bot / 0.02) * 0.02
+        ax_pc.set_yticks(np.arange(tick_start, 1.001, 0.02))
+    ax_pc.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
+
+    all_par_lat = np.concatenate([sd["par"]["latency"].values for sd in studies_data])
+    if len(all_par_lat) > 0:
+        lo, hi = all_par_lat.min(), all_par_lat.max()
+        span = hi - lo
+        pad_lat = span * 0.2 if span > 0 else (lo * 0.2 if lo > 0 else 10.0)
+        ax_pc.set_xlim(lo - pad_lat, hi + pad_lat)
+
+    ax_pc.set_xlabel("Latency on PC (\u00b5s, lower is better)", fontsize=11)
+    ax_pc.set_ylabel("Accuracy (higher is better)", fontsize=11)
+    ax_pc.set_title("PC Pareto Front (\u2605 = MCU-tested)", fontsize=12, fontweight="bold")
+    ax_pc.grid(True, alpha=0.3, linestyle="--")
+    if legend_handles:
+        ax_pc.legend(handles=legend_handles, labels=legend_labels,
+                     framealpha=0.9, fontsize=8)
+
+    # ── Right panel decorations ──────────────────────────────────────────────
+    ax_mcu.set_xlabel("Latency on MCU (\u00b5s, lower is better)", fontsize=11)
+    ax_mcu.set_ylabel("MCU Accuracy (%)", fontsize=11)
+    ax_mcu.set_title("MCU Accuracy vs Latency", fontsize=12, fontweight="bold")
+    ax_mcu.grid(True, alpha=0.3, linestyle="--")
+
+    # Set MCU accuracy y-axis from min to 100%
+    all_mcu_acc = []
+    for sd in studies_data:
+        if sd.get("results_data"):
+            for rd in sd["results_data"]:
+                v = rd.get("mcu_accuracy", np.nan)
+                if not np.isnan(v):
+                    all_mcu_acc.append(v)
+    if all_mcu_acc:
+        lo_mcu = min(all_mcu_acc)
+        range_mcu = 100.0 - lo_mcu
+        pad_mcu = range_mcu * 0.1 if range_mcu > 0 else 5.0
+        bot_mcu = max(0.0, lo_mcu - pad_mcu)
+        ax_mcu.set_ylim(bot_mcu, 105.0)
+        tick_start = np.ceil(bot_mcu / 5.0) * 5.0
+        ax_mcu.set_yticks(np.arange(tick_start, 100.1, 5.0))
+
+    fig.tight_layout()
+    slug = slugify(title)
+    fig.savefig(fig_path(f"mcu_pareto_{slug}.png"), dpi=FIG_DPI)
+    fig.savefig(fig_path(f"mcu_pareto_{slug}.pdf"))
+    print(f"Saved figures/mcu_pareto_{slug}.png and mcu_pareto_{slug}.pdf")
+
+
 def create_pareto_front_plot(studies_data, title):
     """
     Plot and save the Pareto front comparison figure for N studies.
@@ -357,9 +525,10 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy"], required=True,
-        help="Which plot to create: 'pareto' (Pareto front comparison) or "
-             "'accuracy' (float vs quantized accuracy per study)."
+        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto"], required=True,
+        help="Which plot to create: 'pareto' (Pareto front comparison), "
+             "'accuracy' (float vs quantized accuracy per study), or "
+             "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot)."
     )
     parser.add_argument(
         "--title", type=str, default=None,
@@ -438,6 +607,22 @@ def main():
                 plot_created = True
             else:
                 print(f"  No results.json found at {results_path}, skipping.")
+
+    elif args.plot == "mcu_pareto":
+        # ── MCU Pareto plot (PC front + MCU performance) ────────────────────
+        for sd in studies_data:
+            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
+            if results_path.exists():
+                print(f"  Loading MCU results from {results_path} …")
+                with open(results_path) as f:
+                    sd["results_data"] = json.load(f)
+                print(f"    → {len(sd['results_data'])} MCU-tested trials")
+            else:
+                print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
+                sd["results_data"] = []
+
+        create_mcu_pareto_plot(studies_data, title)
+        plot_created = True
 
     elif args.plot == "pareto":
         # ── Pareto front plot ────────────────────────────────────────────────
