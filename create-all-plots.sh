@@ -7,6 +7,10 @@ cd "$(dirname "$0")"
 # Remove old plots before generating new ones
 rm -f figures/*.png figures/pdf/*.pdf
 
+# Plot parameters vs latency
+python -m train.plot_arch_search --plot param_vs_latency --title "Paramter size vs MCU latency (HAR)" config/har/*
+python -m train.plot_arch_search --plot param_vs_latency --title "Paramter size vs MCU latency (KWS)" config/kws/*
+
 # Quantization loss
 python -m train.plot_arch_search --plot quantization_loss config/kws/*
 python -m train.plot_arch_search --plot quantization_loss config/har/*

@@ -24,6 +24,7 @@ from optuna.trial import TrialState
 from torch.utils.data import DataLoader
 
 from .quantize import (
+    get_espdl_param_size,
     quantize_onnx_to_espdl,
     load_calibration,
     load_datasets,
@@ -217,13 +218,13 @@ def parse_predictions(stdout: str) -> list[int]:
 
 def parse_latency(stdout: str) -> float | None:
     """
-    Extract the average single-inference latency (in microseconds) from the
+    Extract the average single-inference latency (in milliseconds) from the
     firmware's stdout.
 
     The firmware outputs a line like:
         I (1037) mamba_har: Average single-inference latency: 8172.1 us (8.172 ms).
 
-    Returns the latency in microseconds (e.g., 8172.1), or None if not found.
+    Returns the latency in milliseconds (e.g., 8.172), or None if not found.
     """
     import re
 
@@ -232,7 +233,7 @@ def parse_latency(stdout: str) -> float | None:
         stdout,
     )
     if match:
-        return float(match.group(1))
+        return float(match.group(1)) / 1000.0
     return None
 
 
@@ -252,7 +253,7 @@ def parse_profiling_table(stdout: str) -> dict[str, dict] | None:
         +--------------------+-------+---------------+-------------+
 
     Returns a dict mapping operator type names to dicts with
-    "count" (int) and "total_latency_us" (int), or None if the table
+    "count" (int) and "total_latency_ms" (float), or None if the table
     is not found.
     """
     import re
@@ -285,7 +286,7 @@ def parse_profiling_table(stdout: str) -> dict[str, dict] | None:
         total_latency = int(row_match.group(3))
         table[op_type] = {
             "count": count,
-            "total_latency_us": total_latency,
+            "total_latency_ms": round(total_latency / 1000.0, 3),
         }
 
     return table if table else None
@@ -486,6 +487,12 @@ def quantize_trial(
     )
     metrics.pop("accuracy_drop", None)
     metrics["trial_number"] = trial_number
+
+    # Compute quantised parameter size from the .info file
+    info_path = espdl_path.with_suffix(".info")
+    metrics["param_size_bytes"] = get_espdl_param_size(info_path)
+    print(f"    Param size  : {metrics['param_size_bytes']} bytes")
+
     results.append(metrics)
 
     results_path = experiments_dir / "results.json"
@@ -601,16 +608,16 @@ def parse_mcu_output(
         print(f"    WARNING: no machine-readable predictions found in output")
 
     print("Parsing latency")
-    latency_us = parse_latency(output_text)
-    if latency_us is not None:
+    latency_ms = parse_latency(output_text)
+    if latency_ms is not None:
         for entry in results:
             if entry["trial_number"] == trial_number:
-                entry["mcu_latency_us"] = float(round(latency_us, 1))
+                entry["mcu_latency_ms"] = float(round(latency_ms, 2))
                 break
         results_path = experiments_dir / "results.json"
         with open(results_path, "w") as f:
             json.dump(results, f, indent=2)
-        print(f"    MCU latency: {latency_us:.1f} us ({latency_us / 1000:.3f} ms)")
+        print(f"    MCU latency: {latency_ms:.2f} ms")
     else:
         print(f"    WARNING: latency line not found in firmware output")
 
@@ -665,6 +672,15 @@ def process_study(
     print(f"  QUANTIZING SELECTED MODELS — {study_name}")
     print("=" * 62)
     print()
+
+    # Backfill param_size_bytes for already-quantised trials that lack it
+    for entry in results:
+        if "param_size_bytes" not in entry:
+            tn = entry.get("trial_number")
+            if tn is not None:
+                info_path = experiments_dir / f"{study_name}-trial-{tn}.info"
+                entry["param_size_bytes"] = get_espdl_param_size(info_path)
+                print(f"  Backfilled param_size for trial #{tn}: {entry['param_size_bytes']} bytes")
 
     for tn in selected_trials:
         if tn in done_trials:

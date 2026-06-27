@@ -156,8 +156,8 @@ The `results.json` file is a JSON array of objects, each with:
 | `float_accuracy` | Accuracy of the original float PyTorch model (%) |
 | `quantized_accuracy` | Accuracy after int8 quantization (on PC) (%) |
 | `mcu_accuracy` | Accuracy measured on ESP32-S3 (%) |
-| `mcu_latency_us` | Average inference latency on ESP32-S3 (µs) |
-| `mcu_profiling` | Dict of operator-level profiling breakdown (count and total latency per op type) |
+| `mcu_latency_ms` | Average inference latency on ESP32-S3 (ms) |
+| `mcu_profiling` | Dict of operator-level profiling breakdown (count and total latency in ms per op type) |
 
 ## Visualisation
 

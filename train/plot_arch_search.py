@@ -154,7 +154,7 @@ def create_mcu_pareto_plot(studies_data, title):
     ----------
     studies_data : list of dict
         Each dict has keys: 'name', 'df', 'par', 'results_data' (list of entries
-        from results.json with ``mcu_accuracy`` and ``mcu_latency_us``),
+        from results.json with ``mcu_accuracy`` and ``mcu_latency_ms``),
         'color', 'color_par', 'idx'.
     title : str
         Used in the plot title and saved file names.
@@ -241,7 +241,7 @@ def create_mcu_pareto_plot(studies_data, title):
             mcu_pts = []
             for rd in sd["results_data"]:
                 mcu_acc = rd.get("mcu_accuracy", np.nan)
-                mcu_lat = rd.get("mcu_latency_us", np.nan)
+                mcu_lat = rd.get("mcu_latency_ms", np.nan)
                 float_acc = rd.get("float_accuracy", np.nan)
                 if not np.isnan(mcu_acc) and not np.isnan(mcu_lat) and not np.isnan(float_acc):
                     mcu_pts.append((mcu_lat, mcu_acc, float_acc, int(rd["trial_number"])))
@@ -369,9 +369,9 @@ def create_profiling_plot(study_name, config_path, trial_number, title):
         return False
 
     # Sort operators by total latency descending
-    ops = sorted(profiling.items(), key=lambda x: x[1]["total_latency_us"], reverse=True)
+    ops = sorted(profiling.items(), key=lambda x: x[1]["total_latency_ms"], reverse=True)
     op_names = [o[0] for o in ops]
-    latencies = [o[1]["total_latency_us"] for o in ops]
+    latencies = [o[1]["total_latency_ms"] for o in ops]
     counts = [o[1]["count"] for o in ops]
 
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -383,7 +383,7 @@ def create_profiling_plot(study_name, config_path, trial_number, title):
 
     ax.set_xticks(x)
     ax.set_xticklabels(op_names, rotation=45, ha="right", fontsize=9)
-    ax.set_ylabel("Total Latency on MCU (µs)", fontsize=11)
+    ax.set_ylabel("Total Latency on MCU (ms)", fontsize=11)
     ax.set_xlabel("Operator Type", fontsize=11)
     ax.set_title(f"MCU Operator Profiling — Trial {trial_number}  ({title})",
                  fontsize=13, fontweight="bold")
@@ -561,6 +561,82 @@ def create_quantization_loss_plot(studies_data, title):
     print(f"Saved figures/quant_loss_{slug}.png and figures/pdf/quant_loss_{slug}.pdf")
 
 
+def create_param_vs_latency_plot(studies_data, title):
+    """
+    Scatter plot of parameter size (bytes) vs MCU latency for all MCU-tested trials.
+
+    Each point represents a model that was profiled on the ESP32-S3. Points are
+    coloured by study and annotated with trial numbers.
+
+    Parameters
+    ----------
+    studies_data : list of dict
+        Each dict has keys: 'name', 'study_name', 'df', 'par', 'results_data',
+        'color', 'color_par', 'idx'.
+    title : str
+        Used in plot title and saved file names.
+    """
+    fig, ax = plt.subplots(figsize=(9, 7))
+
+    # Collect all (param_size, mcu_latency, trial_num) across studies
+    all_points = []
+    legend_handles = []
+    legend_labels = []
+
+    for sd in studies_data:
+        if not sd.get("results_data"):
+            continue
+        for rd in sd["results_data"]:
+            param_size = rd.get("param_size_bytes", np.nan)
+            mcu_lat = rd.get("mcu_latency_ms", np.nan)
+            tn = rd.get("trial_number", -1)
+            if not np.isnan(param_size) and not np.isnan(mcu_lat):
+                all_points.append((param_size, mcu_lat, tn, sd["color_par"], sd["name"]))
+
+        if len([p for p in all_points if p[4] == sd["name"]]) > 0:
+            legend_handles.append(
+                Line2D([0], [0], marker="o", color="w",
+                       markerfacecolor=sd["color_par"], markersize=8)
+            )
+            legend_labels.append(sd["name"])
+
+    if not all_points:
+        print("  No MCU-tested trials with both param_size and MCU latency found.")
+        ax.text(0.5, 0.5, "No MCU data available", ha="center", va="center",
+                transform=ax.transAxes, fontsize=14, color="gray")
+        fig.tight_layout()
+        slug = slugify(title)
+        fig.savefig(fig_path(f"param_vs_latency_{slug}.png"), dpi=FIG_DPI)
+        fig.savefig(fig_pdf_path(f"param_vs_latency_{slug}.pdf"))
+        print(f"Saved figures/param_vs_latency_{slug}.png and figures/pdf/param_vs_latency_{slug}.pdf")
+        return
+
+    param_sizes = [p[0] for p in all_points]
+    mcu_lats = [p[1] for p in all_points]
+    colors = [p[3] for p in all_points]
+
+    ax.scatter(param_sizes, mcu_lats, c=colors, s=60, marker="o",
+               edgecolors="white", linewidths=0.5, zorder=3)
+
+    ax.set_xlabel("Parameter Size (bytes, int8 quantized)", fontsize=11)
+    ax.set_ylabel("Latency on MCU (ms)", fontsize=11)
+    ax.set_title(f"{title}", fontsize=13, fontweight="bold")
+    ax.grid(True, alpha=0.3, linestyle="--")
+
+    # Format x-axis with K suffix for readability
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x/1000:.0f}K"))
+
+    ax.legend(handles=legend_handles + [Line2D([0], [0], color="gray", linewidth=1.5, linestyle="--")],
+              labels=legend_labels,
+              framealpha=0.9, fontsize=9)
+
+    fig.tight_layout()
+    slug = slugify(title)
+    fig.savefig(fig_path(f"param_vs_latency_{slug}.png"), dpi=FIG_DPI)
+    fig.savefig(fig_pdf_path(f"param_vs_latency_{slug}.pdf"))
+    print(f"Saved figures/param_vs_latency_{slug}.png and figures/pdf/param_vs_latency_{slug}.pdf")
+
+
 def create_latency_correlation_plot(studies_data, title):
     """
     Scatter plot of PC latency vs MCU latency for all MCU-tested trials.
@@ -591,7 +667,7 @@ def create_latency_correlation_plot(studies_data, title):
             continue
         for rd in sd["results_data"]:
             tn = rd["trial_number"]
-            mcu_lat = rd.get("mcu_latency_us", np.nan)
+            mcu_lat = rd.get("mcu_latency_ms", np.nan)
             if np.isnan(mcu_lat):
                 continue
             match = sd["df"][sd["df"]["number"] == tn]
@@ -647,7 +723,7 @@ def create_latency_correlation_plot(studies_data, title):
     ax.set_ylim(_auto_lim_origin(mcu_lats))
 
     ax.set_xlabel("Latency on PC (µs)", fontsize=11)
-    ax.set_ylabel("Latency on MCU (µs)", fontsize=11)
+    ax.set_ylabel("Latency on MCU (ms)", fontsize=11)
     ax.set_title("PC Latency vs MCU Latency", fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
 
@@ -757,7 +833,7 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False):
         ax.plot([first_x, first_x], [first_y, y_bottom],
                 color=sd["color_par"], linewidth=1.8, zorder=3)
 
-    xlabel = "Latency on MCU (\u00b5s, lower is better)" if use_mcu else "Latency on PC (\u00b5s, lower is better)"
+    xlabel = "Latency on MCU (ms, lower is better)" if use_mcu else "Latency on PC (ms, lower is better)"
     ax.set_xlabel(xlabel, fontsize=11)
     ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
 
@@ -898,11 +974,12 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto", "latency", "profiling", "quantization_loss"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto", "latency", "param_vs_latency", "profiling", "quantization_loss"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot), "
              "'latency' (PC latency vs MCU latency scatter plot), "
+             "'param_vs_latency' (parameter size vs MCU latency scatter plot), "
              "'profiling' (MCU operator profiling bar chart for a specific trial), or "
              "'quantization_loss' (quantization loss comparison across studies)."
     )
@@ -1039,7 +1116,7 @@ def main():
                 mcu_rows = []
                 for rd in results_data:
                     mcu_acc = rd.get("mcu_accuracy", np.nan)
-                    mcu_lat = rd.get("mcu_latency_us", np.nan)
+                    mcu_lat = rd.get("mcu_latency_ms", np.nan)
                     if not np.isnan(mcu_acc) and not np.isnan(mcu_lat):
                         mcu_rows.append({
                             "accuracy": mcu_acc / 100.0,  # % → fraction
@@ -1057,6 +1134,22 @@ def main():
                 sd["par"] = par
 
         create_pareto_front_plot(studies_data, title, use_mcu=args.use_mcu)
+        plot_created = True
+
+    elif args.plot == "param_vs_latency":
+        # ── Parameter size vs MCU latency scatter plot ──────────────────
+        for sd in studies_data:
+            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
+            if results_path.exists():
+                print(f"  Loading MCU results from {results_path} …")
+                with open(results_path) as f:
+                    sd["results_data"] = json.load(f)
+                print(f"    → {len(sd['results_data'])} MCU-tested trials")
+            else:
+                print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
+                sd["results_data"] = []
+
+        create_param_vs_latency_plot(studies_data, title)
         plot_created = True
 
     elif args.plot == "quantization_loss":
