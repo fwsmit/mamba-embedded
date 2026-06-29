@@ -31,10 +31,10 @@ from .plot_types.profiling import create_profiling_plot
 from .plot_types.common import create_out_dirs
 from .plot_types.param_accuracy import create_param_vs_accuracy_plot
 from .plot_types.param_latency import create_param_vs_latency_plot
-from .plot_types.param_latency import create_param_vs_latency_plot
 from .plot_types.accuracy import create_accuracy_comparison_plot
 from .plot_types.quantization_loss import create_quantization_loss_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
+from .plot_types.latency_correlation import create_latency_correlation_plot
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -88,6 +88,21 @@ def pareto_mask(df):
     return ~dominated
 
 
+def load_results_data(studies_data, repo_root):
+    """Load results.json for each study into sd['results_data']. Returns True if any data was loaded."""
+    any_loaded = False
+    for sd in studies_data:
+        results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
+        if results_path.exists():
+            # print(f"  Loading results from {results_path} …")
+            with open(results_path) as f:
+                sd["results_data"] = json.load(f)
+            # print(f"    → {len(sd['results_data'])} trials")
+            any_loaded = True
+        else:
+            print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
+            sd["results_data"] = []
+    return any_loaded
 
 
 def study_name_from_config(config_path: str) -> str:
@@ -176,11 +191,11 @@ def main():
         name = meta["study_name"]
         display_name = meta["display_name"]
         color_base, color_par = COLORS[i % len(COLORS)]
-        print(f"Study {i+1}: {name}  (from {config_path})  → colour {color_base}")
-        if display_name != name:
-            print(f"  → Plot label: {display_name}")
+        # print(f"Study {i+1}: {name}  (from {config_path})  → colour {color_base}")
+        # if display_name != name:
+        #     print(f"  → Plot label: {display_name}")
 
-        print("  Loading study …")
+        # print("  Loading study …")
         study = load_study(name)
         df = trials_df(study)
         mask = pareto_mask(df)
@@ -204,64 +219,34 @@ def main():
     plot_created = False
 
     if args.plot == "accuracy":
-        # ── Accuracy comparison (inferred from config) ────────────────────────
+        load_results_data(studies_data, repo_root)
         for sd in studies_data:
-            name = sd["name"]
-            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
-            if results_path.exists():
-                print(f"  Loading accuracy results from {results_path} …")
-                with open(results_path) as f:
-                    results_data = json.load(f)
-                create_accuracy_comparison_plot(name, results_data, title, show_mcu=args.mcu)
+            if sd.get("results_data"):
+                create_accuracy_comparison_plot(sd["name"], sd["results_data"], title, show_mcu=args.mcu)
                 plot_created = True
             else:
-                print(f"  No results.json found at {results_path}, skipping.")
+                print(f"  No results.json found for {sd['name']}, skipping.")
 
     elif args.plot == "mcu_pareto":
-        # ── MCU Pareto plot (PC front + MCU performance) ────────────────────
-        for sd in studies_data:
-            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
-            if results_path.exists():
-                print(f"  Loading MCU results from {results_path} …")
-                with open(results_path) as f:
-                    sd["results_data"] = json.load(f)
-                print(f"    → {len(sd['results_data'])} MCU-tested trials")
-            else:
-                print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
-                sd["results_data"] = []
-
+        load_results_data(studies_data, repo_root)
         create_mcu_pareto_plot(studies_data, title)
         plot_created = True
 
     elif args.plot == "latency":
-        # ── PC latency vs MCU latency scatter plot ─────────────────────────
-        for sd in studies_data:
-            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
-            if results_path.exists():
-                print(f"  Loading MCU results from {results_path} …")
-                with open(results_path) as f:
-                    sd["results_data"] = json.load(f)
-                print(f"    → {len(sd['results_data'])} MCU-tested trials")
-            else:
-                print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
-                sd["results_data"] = []
-
+        load_results_data(studies_data, repo_root)
         create_latency_correlation_plot(studies_data, title)
         plot_created = True
 
     elif args.plot == "pareto":
-        # ── Pareto front plot (optionally with MCU data) ────────────────────
         if args.use_mcu:
             print("  Using MCU data from results.json instead of PC objectives ...")
+            load_results_data(studies_data, repo_root)
             for sd in studies_data:
-                results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
-                if not results_path.exists():
-                    print(f"  Warning: No results.json at {results_path}, cannot use MCU data for {sd['name']}.")
+                if not sd.get("results_data"):
+                    print(f"  Warning: No results.json for {sd['name']}, keeping PC data.")
                     continue
-                with open(results_path) as f:
-                    results_data = json.load(f)
                 mcu_rows = []
-                for rd in results_data:
+                for rd in sd["results_data"]:
                     mcu_acc = rd.get("mcu_accuracy", np.nan)
                     mcu_lat = rd.get("mcu_latency_ms", np.nan)
                     if not np.isnan(mcu_acc) and not np.isnan(mcu_lat):
@@ -284,50 +269,18 @@ def main():
         plot_created = True
 
     elif args.plot == "param_vs_latency":
-        # ── Parameter size vs MCU latency scatter plot ──────────────────
-        for sd in studies_data:
-            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
-            if results_path.exists():
-                print(f"  Loading MCU results from {results_path} …")
-                with open(results_path) as f:
-                    sd["results_data"] = json.load(f)
-                print(f"    → {len(sd['results_data'])} MCU-tested trials")
-            else:
-                print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
-                sd["results_data"] = []
-
+        load_results_data(studies_data, repo_root)
         create_param_vs_latency_plot(studies_data, title)
         plot_created = True
 
     elif args.plot == "param_vs_accuracy":
-        for sd in studies_data:
-            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
-            if results_path.exists():
-                print(f"  Loading MCU results from {results_path} …")
-                with open(results_path) as f:
-                    sd["results_data"] = json.load(f)
-                print(f"    → {len(sd['results_data'])} MCU-tested trials")
-            else:
-                print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
-                sd["results_data"] = []
-
+        load_results_data(studies_data, repo_root)
         create_param_vs_accuracy_plot(studies_data, title)
         plot_created = True
 
 
     elif args.plot == "quantization_loss":
-        # ── Quantization loss comparison across studies ────────────────────
-        for sd in studies_data:
-            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
-            if results_path.exists():
-                print(f"  Loading results from {results_path} …")
-                with open(results_path) as f:
-                    sd["results_data"] = json.load(f)
-                print(f"    → {len(sd['results_data'])} trials")
-            else:
-                print(f"  No results.json found at {results_path}, skipping {sd['name']}.")
-                sd["results_data"] = []
-
+        load_results_data(studies_data, repo_root)
         create_quantization_loss_plot(studies_data, title)
         plot_created = True
 
@@ -348,8 +301,6 @@ def main():
 
     if not plot_created:
         print("\nNo plots created.")
-    else:
-        print("\nAll requested figures saved.")
     if args.show:
         plt.show()
     else:

@@ -55,14 +55,7 @@ def create_latency_correlation_plot(studies_data, title):
 
     if not all_points:
         print("  No MCU-tested trials with both PC and MCU latency found.")
-        ax.text(0.5, 0.5, "No MCU data available", ha="center", va="center",
-                transform=ax.transAxes, fontsize=14, color="gray")
-        fig.tight_layout()
-        slug = slugify(title)
-        fig.savefig(fig_path(f"latency_{slug}.png"), dpi=FIG_DPI)
-        fig.savefig(fig_pdf_path(f"latency_{slug}.pdf"))
-        print(f"Saved figures/latency_{slug}.png and figures/pdf/latency_{slug}.pdf")
-        return
+        exit(1)
 
     pc_lats = [p[0] for p in all_points]
     mcu_lats = [p[1] for p in all_points]
