@@ -561,6 +561,68 @@ def create_quantization_loss_plot(studies_data, title):
     print(f"Saved figures/quant_loss_{slug}.png and figures/pdf/quant_loss_{slug}.pdf")
 
 
+def create_param_vs_accuracy_plot(studies_data, title):
+    fig, ax = plt.subplots(figsize=(9, 7))
+
+    all_points = []
+    legend_handles = []
+    legend_labels = []
+
+    for sd in studies_data:
+        if not sd.get("results_data"):
+            continue
+        for rd in sd["results_data"]:
+            param_size = rd.get("param_size_bytes", np.nan)
+            mcu_lat = rd.get("mcu_accuracy", np.nan)
+            tn = rd.get("trial_number", -1)
+            if not np.isnan(param_size) and not np.isnan(mcu_lat):
+                all_points.append((param_size, mcu_lat, tn, sd["color_par"], sd["name"]))
+
+        if len([p for p in all_points if p[4] == sd["name"]]) > 0:
+            legend_handles.append(
+                Line2D([0], [0], marker="o", color="w",
+                       markerfacecolor=sd["color_par"], markersize=8)
+            )
+            legend_labels.append(sd["name"])
+
+    if not all_points:
+        print("  No MCU-tested trials with both param_size and MCU accuracy found.")
+        ax.text(0.5, 0.5, "No MCU data available", ha="center", va="center",
+                transform=ax.transAxes, fontsize=14, color="gray")
+        fig.tight_layout()
+        slug = slugify(title)
+        fig.savefig(fig_path(f"param_vs_accuracy_{slug}.png"), dpi=FIG_DPI)
+        fig.savefig(fig_pdf_path(f"param_vs_accuracy_{slug}.pdf"))
+        print(f"Saved figures/param_vs_accuracy_{slug}.png and figures/pdf/param_vs_accuracy_{slug}.pdf")
+        return
+
+    param_sizes = [p[0] for p in all_points]
+    mcu_lats = [p[1] for p in all_points]
+    colors = [p[3] for p in all_points]
+
+    ax.scatter(param_sizes, mcu_lats, c=colors, s=60, marker="o",
+               edgecolors="white", linewidths=0.5, zorder=3)
+
+    ax.set_xlabel("Parameter Size (bytes, int8 quantized)", fontsize=11)
+    ax.set_ylabel("Accuracy on MCU (%)", fontsize=11)
+    ax.set_title(f"{title}", fontsize=13, fontweight="bold")
+    ax.grid(True, alpha=0.3, linestyle="--")
+
+    # Format x-axis with K suffix for readability
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f"{x/1000:.0f}K"))
+
+    ax.legend(handles=legend_handles + [Line2D([0], [0], color="gray", linewidth=1.5, linestyle="--")],
+              labels=legend_labels,
+              framealpha=0.9, fontsize=9)
+
+    fig.tight_layout()
+    slug = slugify(title)
+    fig.savefig(fig_path(f"param_vs_accuracy_{slug}.png"), dpi=FIG_DPI)
+    fig.savefig(fig_pdf_path(f"param_vs_accuracy_{slug}.pdf"))
+    print(f"Saved figures/param_vs_accuracy_{slug}.png and figures/pdf/param_vs_accuracy_{slug}.pdf")
+
+
+
 def create_param_vs_latency_plot(studies_data, title):
     """
     Scatter plot of parameter size (bytes) vs MCU latency for all MCU-tested trials.
@@ -974,7 +1036,7 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto", "latency", "param_vs_latency", "profiling", "quantization_loss"], required=True,
+        "--plot", "-p", choices=["param_vs_accuracy", "pareto", "accuracy", "mcu_pareto", "latency", "param_vs_latency", "profiling", "quantization_loss"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot), "
@@ -1151,6 +1213,22 @@ def main():
 
         create_param_vs_latency_plot(studies_data, title)
         plot_created = True
+
+    elif args.plot == "param_vs_accuracy":
+        for sd in studies_data:
+            results_path = repo_root / "experiments" / sd["study_name"] / "results.json"
+            if results_path.exists():
+                print(f"  Loading MCU results from {results_path} …")
+                with open(results_path) as f:
+                    sd["results_data"] = json.load(f)
+                print(f"    → {len(sd['results_data'])} MCU-tested trials")
+            else:
+                print(f"  No results.json found at {results_path}, no MCU data for {sd['name']}.")
+                sd["results_data"] = []
+
+        create_param_vs_accuracy_plot(studies_data, title)
+        plot_created = True
+
 
     elif args.plot == "quantization_loss":
         # ── Quantization loss comparison across studies ────────────────────
