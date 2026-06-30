@@ -29,8 +29,7 @@ import warnings
 
 from .plot_types.profiling import create_profiling_plot
 from .plot_types.common import create_out_dirs
-from .plot_types.param_accuracy import create_param_vs_accuracy_plot
-from .plot_types.param_latency import create_param_vs_latency_plot
+from .plot_types.generic_scatter import create_generic_scatter_plot
 from .plot_types.accuracy import create_accuracy_comparison_plot
 from .plot_types.quantization_loss import create_quantization_loss_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
@@ -134,12 +133,12 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["param_vs_accuracy", "pareto", "accuracy", "mcu_pareto", "latency", "param_vs_latency", "profiling", "quantization_loss"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto", "latency", "scatter", "profiling", "quantization_loss"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot), "
              "'latency' (PC latency vs MCU latency scatter plot), "
-             "'param_vs_latency' (parameter size vs MCU latency scatter plot), "
+             "'scatter' (generic scatter plot of two results.json fields), "
              "'profiling' (MCU operator profiling bar chart for a specific trial), or "
              "'quantization_loss' (quantization loss comparison across studies)."
     )
@@ -165,6 +164,22 @@ def main():
         help="Use MCU accuracy and latency from results.json instead of PC objectives "
              "in the Pareto front plot (only valid with --plot pareto)."
     )
+    parser.add_argument(
+        "--x-field", type=str, default=None,
+        help="Field name in results.json for the x-axis (required for --plot scatter)."
+    )
+    parser.add_argument(
+        "--y-field", type=str, default=None,
+        help="Field name in results.json for the y-axis (required for --plot scatter)."
+    )
+    parser.add_argument(
+        "--x-label", type=str, default="",
+        help="X-axis label for the scatter plot (optional)."
+    )
+    parser.add_argument(
+        "--y-label", type=str, default="",
+        help="Y-axis label for the scatter plot (optional)."
+    )
     args = parser.parse_args()
 
     n = len(args.configs)
@@ -183,6 +198,7 @@ def main():
     )
 
     create_out_dirs()
+    print(f"Creating {args.plot} plot")
 
     # ── Gather study data ─────────────────────────────────────────────────────
     studies_data = []
@@ -217,6 +233,7 @@ def main():
 
     # ── Create the requested plot ───────────────────────────────────────────
     plot_created = False
+
 
     if args.plot == "accuracy":
         load_results_data(studies_data, repo_root)
@@ -268,16 +285,14 @@ def main():
         create_pareto_front_plot(studies_data, title, use_mcu=args.use_mcu)
         plot_created = True
 
-    elif args.plot == "param_vs_latency":
+    elif args.plot == "scatter":
+        if args.x_field is None or args.y_field is None:
+            parser.error("--x-field and --y-field are required when using --plot scatter")
         load_results_data(studies_data, repo_root)
-        create_param_vs_latency_plot(studies_data, title)
+        create_generic_scatter_plot(studies_data, title,
+                                    x_field=args.x_field, y_field=args.y_field,
+                                    x_label=args.x_label, y_label=args.y_label)
         plot_created = True
-
-    elif args.plot == "param_vs_accuracy":
-        load_results_data(studies_data, repo_root)
-        create_param_vs_accuracy_plot(studies_data, title)
-        plot_created = True
-
 
     elif args.plot == "quantization_loss":
         load_results_data(studies_data, repo_root)
