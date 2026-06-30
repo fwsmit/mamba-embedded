@@ -4,14 +4,15 @@ hydra:
   output_subdir: null
 
 BATCHSIZE: 128
-EPOCHS: 20
+EPOCHS: 2
 MODEL: mamba-1
-DATASET: har
-EXPERIMENT_NAME: ""
-bidirectional: false
-n_trials: 149
-quantization_precision: 8
-plot_description: "single direction"
+DATASET: kws
+EXPERIMENT_NAME: "2-bidir"
+bidirectional: true
+bidirectional_strategy: add
+n_trials: 100
+quantization_precision: 16
+plot_description: "bidirectional-int16 (add)"
 
 SEARCH_SPACE:
   d_model:

@@ -73,6 +73,7 @@ EPOCHS: 2
 MODEL: mamba-1          # "mamba-1" or "mamba-3"
 DATASET: kws            # "kws" or "har"
 EXPERIMENT_NAME: "v2"   # distinguishes this experiment in the Optuna study name
+quantization_precision: 8  # 8 or 16 — bit-width for quantizing models in top_models.py
 plot_description: "Mamba-1 baseline"  # optional; label used in Pareto front plots
 
 SEARCH_SPACE:

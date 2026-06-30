@@ -11,6 +11,7 @@ EXPERIMENT_NAME: "2-bidir"
 bidirectional: true
 bidirectional_strategy: add
 n_trials: 100
+quantization_precision: 8
 plot_description: "bidirectional (add)"
 
 SEARCH_SPACE:

@@ -36,7 +36,6 @@ from .quantize import (
     CALIB_STEPS,
     CALIB_BATCH,
     TARGET,
-    NUM_OF_BITS,
 )
 
 
@@ -443,6 +442,7 @@ def quantize_trial(
     val_ds: torch.utils.data.Dataset,
     device: str,
     results: list[dict],
+    num_of_bits: int = 8,
 ) -> None:
     """Quantize one trial's ONNX model and append its metrics to *results*."""
     src_onnx = onnx_dir / f"{study_name}-trial-{trial_number}.onnx"
@@ -468,7 +468,7 @@ def quantize_trial(
         calib_steps=CALIB_STEPS,
         input_shape=input_shape,
         target=TARGET,
-        num_of_bits=NUM_OF_BITS,
+        num_of_bits=num_of_bits,
         device=device,
         collate_fn=collate_fn,
     )
@@ -649,6 +649,7 @@ def process_study(
     device: str,
     n_calib_samples: int,
     run_script: Path,
+    num_of_bits: int = 8,
 ) -> None:
     """Run the full pipeline (select, quantize, deploy) for one study."""
     # Load study and select top models
@@ -687,7 +688,8 @@ def process_study(
             print(f"  Trial #{tn}: already quantized, skipping\n")
             continue
         quantize_trial(tn, study_name, onnx_dir, experiments_dir,
-                       calib_loader, val_ds, device, results)
+                       calib_loader, val_ds, device, results,
+                       num_of_bits=num_of_bits)
 
     # Final persist
     results_path = experiments_dir / "results.json"
@@ -727,14 +729,18 @@ def main() -> None:
     run_script = repo_root / "run-esp.sh"
 
     for config_path in args.configs:
+        cfg = OmegaConf.load(config_path)
         study_name = study_name_from_config(config_path)
+        num_of_bits = cfg.get("quantization_precision", 8)
         print()
         print("#" * 62)
         print(f"#  Processing study: {study_name}  (from {config_path})")
+        print(f"#  Quantization precision: {num_of_bits}-bit")
         print("#" * 62)
         print()
 
-        process_study(study_name, args, repo_root, device, n_calib_samples, run_script)
+        process_study(study_name, args, repo_root, device, n_calib_samples, run_script,
+                       num_of_bits=num_of_bits)
 
 
 if __name__ == "__main__":
