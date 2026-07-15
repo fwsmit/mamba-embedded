@@ -443,21 +443,32 @@ def quantize_trial(
     device: str,
     results: list[dict],
     num_of_bits: int = 8,
+    key_suffix: str = "",
 ) -> None:
-    """Quantize one trial's ONNX model and append its metrics to *results*."""
+    """Quantize one trial's ONNX model and add its metrics to *results*.
+
+    If *key_suffix* is non-empty (e.g. "_int16"), quantisation-specific metrics
+    are stored under suffixed keys (e.g. ``quantized_accuracy_int16``) to avoid
+    overwriting entries from a previous precision.  The ``float_accuracy`` key
+    is shared as it is the float baseline for all precisions.
+
+    If an entry for this ``trial_number`` already exists in *results*, the new
+    metrics are merged into it (adding suffixed keys); otherwise a new entry is
+    created.
+    """
     src_onnx = onnx_dir / f"{study_name}-trial-{trial_number}.onnx"
     if not src_onnx.exists():
         print(f"  WARNING: ONNX file not found, skipping trial #{trial_number}: {src_onnx}")
         return
 
     onnx_path = experiments_dir / src_onnx.name
-    shutil.copy2(src_onnx, onnx_path)
+    if not onnx_path.exists():
+        shutil.copy2(src_onnx, onnx_path)
 
-    espdl_path = onnx_path.with_suffix(".espdl")
+    espdl_path = onnx_path.with_suffix(f"{key_suffix}.espdl" if key_suffix else ".espdl")
     input_shape = infer_input_shape(onnx_path)
 
-    print(f"  Trial #{trial_number}: {src_onnx.name}")
-    print(f"    Copy        : {onnx_path}")
+    print(f"  Trial #{trial_number}: {src_onnx.name} ({num_of_bits}-bit)")
     print(f"    Input shape : {input_shape}")
     print(f"    Output      : {espdl_path}")
 
@@ -475,7 +486,7 @@ def quantize_trial(
 
     print(f"    Exporting quantized validation dataset ...")
     configs = get_input_quantization(quant_graph)
-    dataset_bin_path = experiments_dir / f"dataset-trial-{trial_number}.bin"
+    dataset_bin_path = experiments_dir / f"dataset-trial-{trial_number}{key_suffix}.bin"
     quantize_dataset_to_bin(configs, val_ds, dataset_bin_path)
 
     print(f"    Evaluating on validation set ...")
@@ -486,14 +497,28 @@ def quantize_trial(
         device=device,
     )
     metrics.pop("accuracy_drop", None)
-    metrics["trial_number"] = trial_number
+
+    # Build entry: float_accuracy is shared, quant-specific keys get suffix
+    entry: dict = {}
+    entry["trial_number"] = trial_number
+    entry["float_accuracy"] = metrics.pop("float_accuracy")
+    for k, v in metrics.items():
+        entry[f"{k}{key_suffix}"] = v
 
     # Compute quantised parameter size from the .info file
     info_path = espdl_path.with_suffix(".info")
-    metrics["param_size_bytes"] = get_espdl_param_size(info_path)
-    print(f"    Param size  : {metrics['param_size_bytes']} bytes")
+    info_key = f"param_size_bytes{key_suffix}" if key_suffix else "param_size_bytes"
+    entry[info_key] = get_espdl_param_size(info_path)
+    print(f"    Param size  : {entry[info_key]} bytes")
 
-    results.append(metrics)
+    # Merge into existing entry if one exists, otherwise append new
+    existing = next((e for e in results if e.get("trial_number") == trial_number), None)
+    if existing is not None:
+        existing.update(entry)
+        print(f"    Merged into existing entry for trial #{trial_number}")
+    else:
+        results.append(entry)
+        print(f"    Created new entry for trial #{trial_number}")
 
     results_path = experiments_dir / "results.json"
     with open(results_path, "w") as f:
@@ -642,6 +667,12 @@ def parse_mcu_output(
 # ---------------------------------------------------------------------------
 
 
+def _quantized_key_for_precision(num_of_bits: int) -> str:
+    """Return the results.json key expected for ``quantized_accuracy`` at
+    the given bit-width (backward compat: 8-bit uses no suffix)."""
+    return f"quantized_accuracy{'_int' + str(num_of_bits) if num_of_bits != 8 else ''}"
+
+
 def process_study(
     study_name: str,
     args: argparse.Namespace,
@@ -649,9 +680,14 @@ def process_study(
     device: str,
     n_calib_samples: int,
     run_script: Path,
-    num_of_bits: int = 8,
+    num_of_bits_list: list[int],
 ) -> None:
-    """Run the full pipeline (select, quantize, deploy) for one study."""
+    """Run the full pipeline (select, quantize, deploy) for one study.
+
+    *num_of_bits_list* may contain one or more bit-widths (e.g. ``[8]`` or
+    ``[8, 16]``).  Each precision is quantised separately; metrics for
+    non-8-bit widths are stored under suffixed keys (e.g. ``quantized_accuracy_int16``).
+    """
     # Load study and select top models
     complete, values, trial_numbers = load_complete_trials(study_name, args.storage)
     selected_trials = select_top_models(values, trial_numbers, args.top_fraction)
@@ -666,39 +702,44 @@ def process_study(
     calib_loader, val_ds, val_labels = build_data(dataset, repo_root, n_calib_samples)
 
     # Load previously quantized results to avoid rework
-    results, done_trials = load_existing_results(experiments_dir)
+    results, _ = load_existing_results(experiments_dir)
 
-    # Quantize each selected model
-    print("=" * 62)
-    print(f"  QUANTIZING SELECTED MODELS — {study_name}")
-    print("=" * 62)
-    print()
+    # Quantize each selected model at each requested precision
+    for num_of_bits in num_of_bits_list:
+        key_suffix = f"_int{num_of_bits}" if num_of_bits != 8 else ""
+        suffix_desc = f"{num_of_bits}-bit"
+        quant_key = _quantized_key_for_precision(num_of_bits)
 
-    # Backfill param_size_bytes for already-quantised trials that lack it
-    for entry in results:
-        if "param_size_bytes" not in entry:
+        print()
+        print("=" * 62)
+        print(f"  QUANTIZING SELECTED MODELS — {suffix_desc} — {study_name}")
+        print("=" * 62)
+        print()
+
+        # Determine which trials already have results for this precision
+        done_for_precision = set()
+        for entry in results:
             tn = entry.get("trial_number")
-            if tn is not None:
-                info_path = experiments_dir / f"{study_name}-trial-{tn}.info"
-                entry["param_size_bytes"] = get_espdl_param_size(info_path)
-                print(f"  Backfilled param_size for trial #{tn}: {entry['param_size_bytes']} bytes")
+            if tn is not None and quant_key in entry:
+                done_for_precision.add(tn)
 
-    for tn in selected_trials:
-        if tn in done_trials:
-            print(f"  Trial #{tn}: already quantized, skipping\n")
-            continue
-        quantize_trial(tn, study_name, onnx_dir, experiments_dir,
-                       calib_loader, val_ds, device, results,
-                       num_of_bits=num_of_bits)
+        for tn in selected_trials:
+            if tn in done_for_precision:
+                print(f"  Trial #{tn}: {suffix_desc} already quantized, skipping\n")
+                continue
+            quantize_trial(tn, study_name, onnx_dir, experiments_dir,
+                           calib_loader, val_ds, device, results,
+                           num_of_bits=num_of_bits, key_suffix=key_suffix)
 
-    # Final persist
-    results_path = experiments_dir / "results.json"
-    with open(results_path, "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"Results written to {results_path}")
+        # Persist after each precision so partial progress is saved
+        results_path = experiments_dir / "results.json"
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"Results written to {results_path}")
+
     print("All selected models quantized and evaluated.")
 
-    # Deploy each quantized model to ESP32-S3
+    # Deploy each quantized model to ESP32-S3 (only 8-bit for now)
     print()
     print("=" * 62)
     print(f"  RUNNING ON ESP32-S3 — {study_name}")
@@ -731,16 +772,22 @@ def main() -> None:
     for config_path in args.configs:
         cfg = OmegaConf.load(config_path)
         study_name = study_name_from_config(config_path)
-        num_of_bits = cfg.get("quantization_precision", 8)
+        raw = cfg.get("quantization_precision", 8)
+        # Normalise to a list (backward compat: scalar -> single-element list)
+        if type(raw) is int:
+            num_of_bits_list = [raw]
+        else:
+            num_of_bits_list = list(raw)
+        prec_desc = "+".join(str(b) for b in num_of_bits_list)
         print()
         print("#" * 62)
         print(f"#  Processing study: {study_name}  (from {config_path})")
-        print(f"#  Quantization precision: {num_of_bits}-bit")
+        print(f"#  Quantization precision(s): {prec_desc}-bit")
         print("#" * 62)
         print()
 
         process_study(study_name, args, repo_root, device, n_calib_samples, run_script,
-                       num_of_bits=num_of_bits)
+                       num_of_bits_list=num_of_bits_list)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ EXPERIMENT_NAME: "bidir-mul"
 bidirectional: true
 bidirectional_strategy: ew_multiply
 n_trials: 100
-quantization_precision: 8
+quantization_precision: [8, 16]
 plot_description: "bidirectional (mul)"
 
 SEARCH_SPACE:

@@ -73,7 +73,8 @@ EPOCHS: 2
 MODEL: mamba-1          # "mamba-1" or "mamba-3"
 DATASET: kws            # "kws" or "har"
 EXPERIMENT_NAME: "v2"   # distinguishes this experiment in the Optuna study name
-quantization_precision: 8  # 8 or 16 — bit-width for quantizing models in top_models.py
+quantization_precision: [8]       # bit-width(s) for quantizing models in top_models.py
+                                    # scalar (e.g. 8) or list (e.g. [8, 16]) accepted
 plot_description: "Mamba-1 baseline"  # optional; label used in Pareto front plots
 
 SEARCH_SPACE:
@@ -156,6 +157,9 @@ The `results.json` file is a JSON array of objects, each with:
 | `trial_number` | Optuna trial number (links to study DB) |
 | `float_accuracy` | Accuracy of the original float PyTorch model (%) |
 | `quantized_accuracy` | Accuracy after int8 quantization (on PC) (%) |
+| `quantized_accuracy_int16` | Accuracy after int16 quantization (on PC) (%) — only present when 16-bit is requested |
+| `param_size_bytes` | Parameter size after int8 quantization (bytes) |
+| `param_size_bytes_int16` | Parameter size after int16 quantization (bytes) — only present when 16-bit is requested |
 | `mcu_accuracy` | Accuracy measured on ESP32-S3 (%) |
 | `mcu_latency_ms` | Average inference latency on ESP32-S3 (ms) |
 | `mcu_profiling` | Dict of operator-level profiling breakdown (count and total latency in ms per op type) |
