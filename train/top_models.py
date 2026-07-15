@@ -465,7 +465,7 @@ def quantize_trial(
     if not onnx_path.exists():
         shutil.copy2(src_onnx, onnx_path)
 
-    espdl_path = onnx_path.with_suffix(f"{key_suffix}.espdl" if key_suffix else ".espdl")
+    espdl_path = onnx_path.with_stem(f"{onnx_path.stem}{key_suffix}").with_suffix(".espdl")
     input_shape = infer_input_shape(onnx_path)
 
     print(f"  Trial #{trial_number}: {src_onnx.name} ({num_of_bits}-bit)")
