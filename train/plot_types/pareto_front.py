@@ -176,7 +176,7 @@ def create_mcu_pareto_plot(studies_data, title):
         pad_lat = span * 0.2 if span > 0 else (lo * 0.2 if lo > 0 else 10.0)
         ax_pc.set_xlim(lo - pad_lat, hi + pad_lat)
 
-    ax_pc.set_xlabel("Latency on PC (\u00b5s, lower is better)", fontsize=11)
+    ax_pc.set_xlabel("Latency on PC (μs, lower is better)", fontsize=11)
     ax_pc.set_ylabel("Accuracy (higher is better)", fontsize=11)
     ax_pc.set_title("PC Pareto Front (\u2605 = MCU-tested)", fontsize=12, fontweight="bold")
     ax_pc.grid(True, alpha=0.3, linestyle="--")
@@ -185,7 +185,7 @@ def create_mcu_pareto_plot(studies_data, title):
                      framealpha=0.9, fontsize=8)
 
     # ── Right panel decorations ──────────────────────────────────────────────
-    ax_mcu.set_xlabel("Latency on MCU (\u00b5s, lower is better)", fontsize=11)
+    ax_mcu.set_xlabel("Latency on MCU (ms, lower is better)", fontsize=11)
     ax_mcu.set_ylabel("Accuracy (higher is better)", fontsize=11)
     ax_mcu.set_title("MCU Accuracy vs Latency", fontsize=12, fontweight="bold")
     ax_mcu.grid(True, alpha=0.3, linestyle="--")
@@ -308,7 +308,7 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False):
         ax.plot([first_x, first_x], [first_y, y_bottom],
                 color=sd["color_par"], linewidth=1.8, zorder=3)
 
-    xlabel = "Latency on MCU (ms, lower is better)" if use_mcu else "Latency on PC (ms, lower is better)"
+    xlabel = "Latency on MCU (ms, lower is better)" if use_mcu else "Latency on PC (μs, lower is better)"
     ax.set_xlabel(xlabel, fontsize=11)
     ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
 
