@@ -64,16 +64,10 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--calib-steps",
-        type=int,
-        default=CALIB_STEPS,
-        help="Number of calibration batches (default: 32)",
-    )
-
-    parser.add_argument(
-        "--skip-loss-report",
+        "--full-loss",
         action="store_true",
-        help="Skip loading the dataset and reporting quantization loss / model sizes",
+        default=False,
+        help="Run full quantization loss evaluation on the full validation set",
     )
 
     return parser.parse_args()
@@ -222,11 +216,22 @@ def evaluate_quantization_loss(
     onnx_path: str,
     val_ds,
     device: str = DEVICE,
+    subsample_ratio: float = 1.0,
 ):
     """
-    Run float and quantized inference on the full validation set and report
+    Run float and quantized inference on the validation set and report
     probability-level errors, accuracy drop, and per-class probability MSE.
+
+    Args:
+        subsample_ratio: Fraction of the dataset to use (default 1.0 = full).
+                         Set to 0.01 for a quick 1% validation.
     """
+    if subsample_ratio < 1.0:
+        num_samples = int(len(val_ds) * subsample_ratio)
+        if num_samples < 1:
+            num_samples = 1
+        val_ds = torch.utils.data.Subset(val_ds, range(num_samples))
+
     val_loader = DataLoader(
         val_ds,
         batch_size=1,
@@ -858,9 +863,8 @@ def main():
     # Quantization loss evaluation on full validation set
     # -----------------------------------------------------------------------
 
-    if not args.skip_loss_report:
+    if args.full_loss:
         print("\n[3/4] Evaluating quantization loss on validation set ...")
-
         evaluate_quantization_loss(
             quant_graph=quant_graph,
             onnx_path=str(onnx_path),
@@ -868,7 +872,14 @@ def main():
             device=device,
         )
     else:
-        print("\n[3/4] Skipping quantization loss evaluation (--skip-loss-report)")
+        print("\n[3/4] Evaluating quantization loss on 1%% of validation set ...")
+        evaluate_quantization_loss(
+            quant_graph=quant_graph,
+            onnx_path=str(onnx_path),
+            val_ds=val_ds,
+            device=device,
+            subsample_ratio=0.01,
+        )
 
     # -----------------------------------------------------------------------
     # Outputs
