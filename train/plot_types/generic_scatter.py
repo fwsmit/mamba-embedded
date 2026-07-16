@@ -16,6 +16,26 @@ from matplotlib import ticker
 from .common import savefig, slugify, fig_path, fig_pdf_path, FIG_DPI
 
 
+# ── Dynamically computed fields ───────────────────────────────────────────────
+# These fields are not stored in results.json but are derived from existing ones.
+# Each entry maps a field name to a callable that takes a result dict and returns
+# the computed value (or None if the required source fields are missing).
+_COMPUTED_FIELDS = {
+    "quantization_loss_int8": lambda rd: (
+        rd.get("float_accuracy", np.nan) - rd.get("quantized_accuracy", np.nan)
+        if not np.isnan(rd.get("float_accuracy", np.nan))
+           and not np.isnan(rd.get("quantized_accuracy", np.nan))
+        else np.nan
+    ),
+    "quantization_loss_int16": lambda rd: (
+        rd.get("float_accuracy", np.nan) - rd.get("quantized_accuracy_int16", np.nan)
+        if not np.isnan(rd.get("float_accuracy", np.nan))
+           and not np.isnan(rd.get("quantized_accuracy_int16", np.nan))
+        else np.nan
+    ),
+}
+
+
 def create_generic_scatter_plot(studies_data, title, x_field, y_field,
                                 x_label="", y_label=""):
     """
@@ -48,8 +68,8 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
         if not sd.get("results_data"):
             continue
         for rd in sd["results_data"]:
-            x_val = rd.get(x_field, np.nan)
-            y_val = rd.get(y_field, np.nan)
+            x_val = _resolve_field(rd, x_field)
+            y_val = _resolve_field(rd, y_field)
             tn = rd.get("trial_number", -1)
             if not np.isnan(x_val) and not np.isnan(y_val):
                 all_points.append((x_val, y_val, tn, sd["color_par"], sd["name"]))
@@ -87,3 +107,13 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
               framealpha=0.9, fontsize=9)
 
     savefig(fig, title, "scatter")
+
+
+def _resolve_field(rd, field):
+    """Look up *field* in result dict *rd*, falling back to computed fields."""
+    val = rd.get(field, np.nan)
+    if not np.isnan(val):
+        return val
+    if field in _COMPUTED_FIELDS:
+        return _COMPUTED_FIELDS[field](rd)
+    return np.nan
