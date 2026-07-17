@@ -400,8 +400,9 @@ def infer_dataset(study_name: str) -> str:
 
 def build_data(
     dataset: str, repo_root: Path, n_calib_samples: int,
-) -> tuple[DataLoader, torch.utils.data.Dataset, np.ndarray]:
-    """Return calibration loader, validation dataset, and validation labels."""
+) -> tuple[DataLoader, torch.utils.data.Dataset, np.ndarray,
+            torch.utils.data.Dataset, np.ndarray]:
+    """Return calibration loader, validation dataset/labels, and test dataset/labels."""
     print("Building calibration dataloader ...")
     calib_loader = load_calibration(dataset, repo_root, n_calib_samples)
     print(f"  Loaded {n_calib_samples} calibration samples")
@@ -409,12 +410,19 @@ def build_data(
     print("Building validation dataloader ...")
     val_ds = load_datasets(dataset, split="val")
     print(f"  Loaded {len(val_ds)} validation samples")
-    print()
 
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False, drop_last=False)
     val_labels = np.concatenate([target.numpy() for _, target in val_loader])
 
-    return calib_loader, val_ds, val_labels
+    print("Building test dataloader ...")
+    test_ds = load_datasets(dataset, split="test")
+    print(f"  Loaded {len(test_ds)} test samples")
+    print()
+
+    test_loader = DataLoader(test_ds, batch_size=1, shuffle=False, drop_last=False)
+    test_labels = np.concatenate([target.numpy() for _, target in test_loader])
+
+    return calib_loader, val_ds, val_labels, test_ds, test_labels
 
 
 def load_existing_results(
@@ -440,6 +448,7 @@ def quantize_trial(
     experiments_dir: Path,
     calib_loader: DataLoader,
     val_ds: torch.utils.data.Dataset,
+    test_ds: torch.utils.data.Dataset,
     device: str,
     results: list[dict],
     num_of_bits: int = 8,
@@ -498,12 +507,24 @@ def quantize_trial(
     )
     metrics.pop("accuracy_drop", None)
 
+    print(f"    Evaluating on test set ...")
+    test_metrics = evaluate_quantization_loss(
+        quant_graph=quant_graph,
+        onnx_path=str(onnx_path),
+        val_ds=test_ds,
+        device=device,
+    )
+    test_metrics.pop("accuracy_drop", None)
+
     # Build entry: float_accuracy is shared, quant-specific keys get suffix
     entry: dict = {}
     entry["trial_number"] = trial_number
     entry["float_accuracy"] = metrics.pop("float_accuracy")
     for k, v in metrics.items():
         entry[f"{k}{key_suffix}"] = v
+    entry["test_float_accuracy"] = test_metrics.pop("float_accuracy")
+    for k, v in test_metrics.items():
+        entry[f"test_{k}{key_suffix}"] = v
 
     # Compute quantised parameter size from the .info file
     info_path = espdl_path.with_suffix(".info")
@@ -673,6 +694,12 @@ def _quantized_key_for_precision(num_of_bits: int) -> str:
     return f"quantized_accuracy{'_int' + str(num_of_bits) if num_of_bits != 8 else ''}"
 
 
+def _test_quantized_key_for_precision(num_of_bits: int) -> str:
+    """Return the results.json key expected for ``test_quantized_accuracy`` at
+    the given bit-width (backward compat: 8-bit uses no suffix)."""
+    return f"test_quantized_accuracy{'_int' + str(num_of_bits) if num_of_bits != 8 else ''}"
+
+
 def process_study(
     study_name: str,
     args: argparse.Namespace,
@@ -687,6 +714,8 @@ def process_study(
     *num_of_bits_list* may contain one or more bit-widths (e.g. ``[8]`` or
     ``[8, 16]``).  Each precision is quantised separately; metrics for
     non-8-bit widths are stored under suffixed keys (e.g. ``quantized_accuracy_int16``).
+    Accuracy on the test set is stored under keys prefixed with ``test_``
+    (e.g. ``test_float_accuracy``, ``test_quantized_accuracy_int16``).
     """
     # Load study and select top models
     complete, values, trial_numbers = load_complete_trials(study_name, args.storage)
@@ -699,7 +728,8 @@ def process_study(
     experiments_dir.mkdir(parents=True, exist_ok=True)
 
     # Build data loaders (reused for all models in this study)
-    calib_loader, val_ds, val_labels = build_data(dataset, repo_root, n_calib_samples)
+    calib_loader, val_ds, val_labels, test_ds, test_labels = build_data(
+        dataset, repo_root, n_calib_samples)
 
     # Load previously quantized results to avoid rework
     results, _ = load_existing_results(experiments_dir)
@@ -709,6 +739,7 @@ def process_study(
         key_suffix = f"_int{num_of_bits}" if num_of_bits != 8 else ""
         suffix_desc = f"{num_of_bits}-bit"
         quant_key = _quantized_key_for_precision(num_of_bits)
+        test_quant_key = _test_quantized_key_for_precision(num_of_bits)
 
         print()
         print("=" * 62)
@@ -720,7 +751,7 @@ def process_study(
         done_for_precision = set()
         for entry in results:
             tn = entry.get("trial_number")
-            if tn is not None and quant_key in entry:
+            if tn is not None and quant_key in entry and test_quant_key in entry:
                 done_for_precision.add(tn)
 
         for tn in selected_trials:
@@ -728,7 +759,7 @@ def process_study(
                 print(f"  Trial #{tn}: {suffix_desc} already quantized, skipping\n")
                 continue
             quantize_trial(tn, study_name, onnx_dir, experiments_dir,
-                           calib_loader, val_ds, device, results,
+                           calib_loader, val_ds, test_ds, device, results,
                            num_of_bits=num_of_bits, key_suffix=key_suffix)
 
         # Persist after each precision so partial progress is saved

@@ -155,11 +155,14 @@ The `results.json` file is a JSON array of objects, each with:
 | Field | Description |
 |-------|-------------|
 | `trial_number` | Optuna trial number (links to study DB) |
-| `float_accuracy` | Accuracy of the original float PyTorch model (%) |
-| `quantized_accuracy` | Accuracy after int8 quantization (on PC) (%) |
-| `quantized_accuracy_int16` | Accuracy after int16 quantization (on PC) (%) — only present when 16-bit is requested |
+| `float_accuracy` | Accuracy of the original float PyTorch model on validation set (%) |
+| `quantized_accuracy` | Accuracy after int8 quantization (on PC) on validation set (%) |
+| `quantized_accuracy_int16` | Accuracy after int16 quantization (on PC) on validation set (%) — only present when 16-bit is requested |
 | `param_size_bytes` | Parameter size after int8 quantization (bytes) |
 | `param_size_bytes_int16` | Parameter size after int16 quantization (bytes) — only present when 16-bit is requested |
+| `test_float_accuracy` | Accuracy of the float model on the test set (%) |
+| `test_quantized_accuracy` | Accuracy after int8 quantization on the test set (%) |
+| `test_quantized_accuracy_int16` | Accuracy after int16 quantization on the test set (%) — only present when 16-bit is requested |
 | `mcu_accuracy` | Accuracy measured on ESP32-S3 (%) |
 | `mcu_latency_ms` | Average inference latency on ESP32-S3 (ms) |
 | `mcu_profiling` | Dict of operator-level profiling breakdown (count and total latency in ms per op type) |
