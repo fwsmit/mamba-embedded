@@ -7,6 +7,11 @@ cd "$(dirname "$0")"
 # Remove old plots before generating new ones
 rm -f figures/*.png figures/pdf/*.pdf
 
+# Investigate quantization loss
+python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field quantization_loss_int8 --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Quantization loss (int8)" --title "Quantization loss vs parameter size (HAR)" config/har/*
+python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field quantization_loss_int8 --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Quantization loss (int8)" --title "Quantization loss vs parameter size (KWS)" config/kws/*
+python -m train.plot_arch_search --plot scatter --x-field lr --y-field quantization_loss_int8 --x-label "Learning rate" --y-label "Quantization loss (int8)" --title "Quantization loss vs learning rate" config/har/arch-mamba1-har.yaml
+
 # Scatter: parameter size vs MCU latency
 python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field mcu_latency_ms --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Latency on MCU (ms)" --title "Parameter size vs MCU latency (HAR)" config/har/*
 python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field mcu_latency_ms --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Latency on MCU (ms)" --title "Parameter size vs MCU latency (KWS)" config/kws/*
@@ -22,12 +27,14 @@ python -m train.plot_arch_search --plot quantization_loss config/har/*
 # Profiling plot
 python -m train.plot_arch_search --plot profiling --trial 18 config/har/arch-mamba1-har-bidir-mul.yaml
 
+# python -m train.plot_arch_search --plot latency config/kws/* --title "PC latency vs MCU latency (KWS)"
+# python -m train.plot_arch_search --plot latency config/har/* --title "PC latency vs MCU latency (HAR)"
 python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-2.yaml
-# python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir.yaml
-# python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir-mul.yaml
-# python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har.yaml
-# python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir.yaml
-# python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir-mul.yaml
+python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir.yaml
+python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-bidir-mul.yaml
+python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har.yaml
+python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir.yaml
+python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir-mul.yaml
 
 python -m train.plot_arch_search --plot mcu_pareto config/kws/*
 python -m train.plot_arch_search --plot mcu_pareto config/har/*

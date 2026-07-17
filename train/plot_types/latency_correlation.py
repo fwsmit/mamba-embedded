@@ -7,6 +7,16 @@ from matplotlib import ticker
 from .common import savefig
 
 
+def _dataset_label(title):
+    """Extract dataset label(s) from a study-name-style title string."""
+    parts = []
+    if "har" in title.lower().split("-"):
+        parts.append("HAR")
+    if "kws" in title.lower().split("-"):
+        parts.append("KWS")
+    return " & ".join(parts) if parts else None
+
+
 def create_latency_correlation_plot(studies_data, title):
     """
     Scatter plot of PC latency vs MCU latency for all MCU-tested trials.
@@ -87,7 +97,11 @@ def create_latency_correlation_plot(studies_data, title):
 
     ax.set_xlabel("Latency on PC (µs)", fontsize=11)
     ax.set_ylabel("Latency on MCU (ms)", fontsize=11)
-    ax.set_title("PC Latency vs MCU Latency", fontsize=13, fontweight="bold")
+    ds_label = _dataset_label(title)
+    plot_title = "PC Latency vs MCU Latency"
+    if ds_label:
+        plot_title += f" ({ds_label})"
+    ax.set_title(plot_title, fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
 
     # Draw trend line across the full x-axis span

@@ -68,8 +68,8 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
         if not sd.get("results_data"):
             continue
         for rd in sd["results_data"]:
-            x_val = _resolve_field(rd, x_field)
-            y_val = _resolve_field(rd, y_field)
+            x_val = _resolve_field(rd, x_field, df=sd.get("df"))
+            y_val = _resolve_field(rd, y_field, df=sd.get("df"))
             tn = rd.get("trial_number", -1)
             if not np.isnan(x_val) and not np.isnan(y_val):
                 all_points.append((x_val, y_val, tn, sd["color_par"], sd["name"]))
@@ -109,11 +109,26 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
     savefig(fig, title, "scatter")
 
 
-def _resolve_field(rd, field):
-    """Look up *field* in result dict *rd*, falling back to computed fields."""
+def _resolve_field(rd, field, df=None):
+    """Look up *field* in result dict *rd*, falling back to computed fields,
+    then to study trial params (via *df*).
+    """
     val = rd.get(field, np.nan)
     if not np.isnan(val):
         return val
     if field in _COMPUTED_FIELDS:
-        return _COMPUTED_FIELDS[field](rd)
+        val = _COMPUTED_FIELDS[field](rd)
+        if not np.isnan(val):
+            return val
+    # Fallback to study trial params (via df)
+    if df is not None and not df.empty:
+        trial_number = rd.get("trial_number", None)
+        if trial_number is not None and field in df.columns:
+            row = df[df["number"] == trial_number]
+            if not row.empty:
+                val = row[field].iloc[0]
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    pass
     return np.nan
