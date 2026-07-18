@@ -28,7 +28,8 @@ from .quantize import (
     quantize_onnx_to_espdl,
     load_calibration,
     load_datasets,
-    evaluate_quantization_loss,
+    run_espdl_test,
+    run_onnx_test,
     get_input_quantization,
     quantize_dataset_to_bin,
     infer_input_shape,
@@ -36,6 +37,8 @@ from .quantize import (
     CALIB_STEPS,
     CALIB_BATCH,
     TARGET,
+    run_espdl_test,
+    run_onnx_test,
 )
 
 
@@ -357,6 +360,38 @@ def load_complete_trials(
     return complete, values, trial_numbers
 
 
+def update_result(
+    experiments_dir: Path,
+    trial_number: int,
+    key: str,
+    value,
+) -> list[dict]:
+    """Load results.json, set `key` = `value` for the given trial_number, save back.
+
+    If no entry exists yet for trial_number, a new one is created.
+    Returns the full updated results list.
+    """
+    results_path = experiments_dir / "results.json"
+
+    results: list[dict] = []
+    if results_path.exists():
+        with open(results_path, "r") as f:
+            results = json.load(f)
+
+    for r in results:
+        if r["trial_number"] == trial_number:
+            r[key] = value
+            break
+    else:
+        results.append({"trial_number": trial_number, key: value})
+
+    with open(results_path, "w") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"  Updated trial {trial_number}: {key} = {value} ({results_path})")
+    return results
+
+
 def select_top_models(
     values: list[tuple[float, float]],
     trial_numbers: list[int],
@@ -453,7 +488,7 @@ def quantize_trial(
     results: list[dict],
     num_of_bits: int = 8,
     key_suffix: str = "",
-) -> None:
+):  # -> None:
     """Quantize one trial's ONNX model and add its metrics to *results*.
 
     If *key_suffix* is non-empty (e.g. "_int16"), quantisation-specific metrics
@@ -468,13 +503,18 @@ def quantize_trial(
     src_onnx = onnx_dir / f"{study_name}-trial-{trial_number}.onnx"
     if not src_onnx.exists():
         print(f"  WARNING: ONNX file not found, skipping trial #{trial_number}: {src_onnx}")
-        return
+        return None
 
     onnx_path = experiments_dir / src_onnx.name
     if not onnx_path.exists():
         shutil.copy2(src_onnx, onnx_path)
 
     espdl_path = onnx_path.with_stem(f"{onnx_path.stem}{key_suffix}").with_suffix(".espdl")
+
+    # if espdl_path.exists():
+    #     print("Trail is already quantized. Skipping...")
+    #     return espdl_path
+
     input_shape = infer_input_shape(onnx_path)
 
     print(f"  Trial #{trial_number}: {src_onnx.name} ({num_of_bits}-bit)")
@@ -498,33 +538,16 @@ def quantize_trial(
     dataset_bin_path = experiments_dir / f"dataset-trial-{trial_number}{key_suffix}.bin"
     quantize_dataset_to_bin(configs, val_ds, dataset_bin_path)
 
-    print(f"    Evaluating on validation set ...")
-    metrics = evaluate_quantization_loss(
-        quant_graph=quant_graph,
-        onnx_path=str(onnx_path),
-        val_ds=val_ds,
-        device=device,
-    )
-    metrics.pop("accuracy_drop", None)
-
-    print(f"    Evaluating on test set ...")
-    test_metrics = evaluate_quantization_loss(
-        quant_graph=quant_graph,
-        onnx_path=str(onnx_path),
-        val_ds=test_ds,
-        device=device,
-    )
-    test_metrics.pop("accuracy_drop", None)
 
     # Build entry: float_accuracy is shared, quant-specific keys get suffix
     entry: dict = {}
     entry["trial_number"] = trial_number
-    entry["float_accuracy"] = metrics.pop("float_accuracy")
-    for k, v in metrics.items():
-        entry[f"{k}{key_suffix}"] = v
-    entry["test_float_accuracy"] = test_metrics.pop("float_accuracy")
-    for k, v in test_metrics.items():
-        entry[f"test_{k}{key_suffix}"] = v
+    # entry["float_accuracy"] = metrics.pop("float_accuracy")
+    # for k, v in metrics.items():
+    #     entry[f"{k}{key_suffix}"] = v
+    # entry["test_float_accuracy"] = test_metrics.pop("float_accuracy")
+    # for k, v in test_metrics.items():
+    #     entry[f"test_{k}{key_suffix}"] = v
 
     # Compute quantised parameter size from the .info file
     info_path = espdl_path.with_suffix(".info")
@@ -545,6 +568,8 @@ def quantize_trial(
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"    Done.\n")
+
+    return quant_graph
 
 
 def deploy_trial(
@@ -639,7 +664,6 @@ def parse_mcu_output(
             mcu_acc = np.mean(np.array(predictions) == val_labels) * 100.0
             for entry in results:
                 if entry["trial_number"] == trial_number:
-                    entry.pop("accuracy_drop", None)
                     entry["mcu_accuracy"] = float(round(mcu_acc, 2))
                     break
             results_path = experiments_dir / "results.json"
@@ -748,27 +772,68 @@ def process_study(
         print()
 
         # Determine which trials already have results for this precision
-        done_for_precision = set()
+        done_valid_for_precision = set()
+        done_test_for_precision = set()
         for entry in results:
             tn = entry.get("trial_number")
-            if tn is not None and quant_key in entry and test_quant_key in entry:
-                done_for_precision.add(tn)
+            if tn is not None and quant_key in entry:
+                done_valid_for_precision.add(tn)
+            if tn is not None and test_quant_key in entry:
+                done_test_for_precision.add(tn)
 
         for tn in selected_trials:
-            if tn in done_for_precision:
-                print(f"  Trial #{tn}: {suffix_desc} already quantized, skipping\n")
-                continue
-            quantize_trial(tn, study_name, onnx_dir, experiments_dir,
+            quant_graph = quantize_trial(tn, study_name, onnx_dir, experiments_dir,
                            calib_loader, val_ds, test_ds, device, results,
                            num_of_bits=num_of_bits, key_suffix=key_suffix)
 
-        # Persist after each precision so partial progress is saved
-        results_path = experiments_dir / "results.json"
-        with open(results_path, "w") as f:
-            json.dump(results, f, indent=2)
-        print(f"Results written to {results_path}")
+            if not quant_graph:
+                print("WARNING: quantization did not work, probably missing ONNX file")
+                continue
+
+            assert (quant_graph)
+
+            if tn in done_valid_for_precision and tn in done_test_for_precision:
+                print(f"  Trial #{tn}: {suffix_desc} already tested on validation and test set, skipping\n")
+
+            if tn not in done_valid_for_precision:
+                print(f"    Evaluating on validation set ...")
+                accuracy = run_espdl_test(quant_graph, val_ds, 'cuda')
+                update_result(experiments_dir, tn, quant_key, accuracy)
+
+            if tn not in done_test_for_precision:
+                print(f"    Evaluating on test set ...")
+                accuracy = run_espdl_test(quant_graph, test_ds, 'cuda')
+                update_result(experiments_dir, tn, test_quant_key, accuracy)
 
     print("All selected models quantized and evaluated.")
+
+    done_valid_for_float = set()
+    done_test_for_float = set()
+    for entry in results:
+        tn = entry.get("trial_number")
+        if tn is not None and "float_accuracy" in entry:
+            done_valid_for_float.add(tn)
+        if tn is not None and "test_float_accuracy" in entry:
+            done_test_for_float.add(tn)
+
+    print("Calculation ONNX model accuracy")
+    # Calculate ONNX precision
+    for tn in selected_trials:
+        onnx_path = experiments_dir / f"{study_name}-trial-{tn}.onnx"
+        if tn in done_valid_for_float and tn in done_test_for_float:
+            print(f"  Trial #{tn} ONNX: already tested on validation and test set, skipping\n")
+            continue
+
+        if not tn in done_valid_for_float:
+            print(f"    Evaluating on validation set ...")
+            accuracy = run_onnx_test(str(onnx_path), val_ds)
+            update_result(experiments_dir, tn, "float_accuracy", accuracy)
+
+        if not tn in done_test_for_float:
+            print(f"    Evaluating on test set ...")
+            accuracy = run_onnx_test(str(onnx_path), test_ds)
+            update_result(experiments_dir, tn, "test_float_accuracy", accuracy)
+
 
     # Deploy each quantized model to ESP32-S3 (only 8-bit for now)
     print()

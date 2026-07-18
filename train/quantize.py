@@ -11,18 +11,15 @@ from pathlib import Path
 import numpy as np
 import onnx
 import onnxruntime as ort
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from esp_ppq.api import espdl_quantize_onnx
 import torch
 from torch.utils.data import Subset
 from .data import load_har_data, load_speechcommands_data
-from code import InteractiveConsole
 
 from esp_ppq.executor import TorchExecutor
 from esp_ppq.IR import QuantableOperation
 from esp_ppq.core import (
-    QuantizationPolicy,
-    QuantizationProperty,
     QuantizationStates,
     TensorQuantizationConfig,
 )
@@ -211,146 +208,74 @@ def _softmax(x):
     return e_x / np.sum(e_x, axis=-1, keepdims=True)
 
 
-def evaluate_quantization_loss(
-    quant_graph: BaseGraph,
-    onnx_path: str,
-    val_ds,
-    device: str = DEVICE,
-    subsample_ratio: float = 1.0,
-):
-    """
-    Run float and quantized inference on the validation set and report
-    probability-level errors, accuracy drop, and per-class probability MSE.
-
-    Args:
-        subsample_ratio: Fraction of the dataset to use (default 1.0 = full).
-                         Set to 0.01 for a quick 1% validation.
-    """
+def _build_data_loader(dataset, subsample_ratio: float = 1.0):
+    """Optionally subsample the dataset, then wrap it in a DataLoader."""
     if subsample_ratio < 1.0:
-        num_samples = int(len(val_ds) * subsample_ratio)
+        num_samples = int(len(dataset) * subsample_ratio)
         if num_samples < 1:
             num_samples = 1
-        val_ds = torch.utils.data.Subset(val_ds, range(num_samples))
+        dataset = torch.utils.data.Subset(dataset, range(num_samples))
 
-    val_loader = DataLoader(
-        val_ds,
+    data_loader = DataLoader(
+        dataset,
         batch_size=1,
         shuffle=False,
         drop_last=False,
     )
+    return dataset, data_loader
 
+
+def run_onnx_test(onnx_path: str, dataset, subsample_ratio: float = 1.0) -> dict:
+    """
+    Run float (ONNX Runtime) inference over the dataset and report accuracy.
+    """
+    dataset, data_loader = _build_data_loader(dataset, subsample_ratio)
     ort_sess = ort.InferenceSession(str(onnx_path))
-    quant_executor = TorchExecutor(graph=quant_graph, device=device)
 
-    all_float_logits = []
-    all_quant_logits = []
+    all_logits = []
     all_labels = []
 
-    for data, target in val_loader:
+    for data, target in data_loader:
         data_np = data.numpy()
-
-        # Float inference
         float_out = ort_sess.run(None, {"input": data_np})[0]
 
-        # Quantized inference
-        quant_out = quant_executor.forward(inputs=data.to(device))[0]
-        quant_out = quant_out.cpu().numpy()
-
-        all_float_logits.append(float_out)
-        all_quant_logits.append(quant_out)
+        all_logits.append(float_out)
         all_labels.append(target.numpy())
 
-    all_float_logits = np.concatenate(all_float_logits, axis=0)
-    all_quant_logits = np.concatenate(all_quant_logits, axis=0)
+    all_logits = np.concatenate(all_logits, axis=0)
     all_labels = np.concatenate(all_labels, axis=0)
 
-    # Convert to probabilities
-    all_float_probs = _softmax(all_float_logits)
-    all_quant_probs = _softmax(all_quant_logits)
+    preds = np.argmax(all_logits, axis=1)
+    accuracy = np.mean(preds == all_labels) * 100.0
 
-    # --- Probability-level error ---
-    prob_diff = all_float_probs - all_quant_probs
-    prob_mse = np.mean(prob_diff ** 2)
-    prob_mae = np.mean(np.abs(prob_diff))
-    prob_max_err = np.max(np.abs(prob_diff))
+    print(f"[ONNX]  Samples: {len(dataset)}  |  Accuracy: {accuracy:.2f} %")
 
-    # --- KL divergence per sample, then average ---
-    # D_KL(P || Q) = sum(P * log(P / Q))
-    eps = 1e-12
-    kl_div = np.sum(
-        all_float_probs * np.log((all_float_probs + eps) / (all_quant_probs + eps)),
-        axis=1,
-    )
-    kl_mean = np.mean(kl_div)
-    kl_max = np.max(kl_div)
+    return accuracy
 
-    # --- Accuracy (as percentage) ---
-    float_preds = np.argmax(all_float_logits, axis=1)
-    quant_preds = np.argmax(all_quant_logits, axis=1)
 
-    float_acc = np.mean(float_preds == all_labels) * 100.0
-    quant_acc = np.mean(quant_preds == all_labels) * 100.0
-    acc_drop = float_acc - quant_acc
-    agreement = np.mean(float_preds == quant_preds) * 100.0
 
-    # --- Per-class probability MSE ---
-    num_classes = all_float_logits.shape[1]
-    per_class_mse = []
-    for c in range(num_classes):
-        mask = all_labels == c
-        if mask.sum() > 0:
-            c_mse = np.mean(prob_diff[mask] ** 2)
-        else:
-            c_mse = 0.0
-        per_class_mse.append(c_mse)
 
-    # --- Confidence change ---
-    float_conf = np.max(all_float_probs, axis=1)
-    quant_conf = np.max(all_quant_probs, axis=1)
-    mean_conf_drop = np.mean(float_conf - quant_conf) * 100.0
-
-    # --- Print report ---
-    print()
-    print("=" * 62)
-    print("  QUANTIZATION LOSS REPORT")
-    print("=" * 62)
-    print(f"  Validation samples : {len(val_ds)}")
-    print()
-    print("  ┌─ Probability-level error (softmax outputs) ────┐")
-    print(f"  │  Mean Squared Error (MSE) : {prob_mse:.6e}      │")
-    print(f"  │  Mean Absolute Error (MAE): {prob_mae:.6e}      │")
-    print(f"  │  Max Absolute Error       : {prob_max_err:.6e}  │")
-    print(f"  │  Mean KL divergence       : {kl_mean:.6e}       │")
-    print(f"  │  Max KL divergence        : {kl_max:.6e}        │")
-    print(f"  │  Mean confidence drop     : {mean_conf_drop:.2f} % │")
-    print("  └──────────────────────────────────────────────────┘")
-    print()
-    print("  ┌─ Accuracy (argmax) ────────────────────────────┐")
-    print(f"  │  Float accuracy           : {float_acc:6.2f} %   │")
-    print(f"  │  Quantized accuracy       : {quant_acc:6.2f} %   │")
-    print(f"  │  Accuracy drop            : {acc_drop:6.2f} %   │")
-    print(f"  │  Prediction agreement     : {agreement:6.2f} %   │")
-    print("  └──────────────────────────────────────────────────┘")
-    print()
-    print("  ┌─ Per-class probability MSE ────────────────────┐")
-    for c in range(num_classes):
-        print(f"  │  Class {c:<2}  MSE = {per_class_mse[c]:.6e}            │")
-    print("  └──────────────────────────────────────────────────┘")
-    print()
-
-    return {
-        "float_accuracy": float(round(float_acc, 2)),
-        "quantized_accuracy": float(round(quant_acc, 2)),
-        "accuracy_drop": float(round(acc_drop, 2)),
-        "prediction_agreement": float(round(agreement, 2)),
-        "prob_mse": float(prob_mse),
-        "prob_mae": float(prob_mae),
-        "prob_max_err": float(prob_max_err),
-        "kl_mean": float(kl_mean),
-        "kl_max": float(kl_max),
-        "mean_conf_drop": float(round(mean_conf_drop, 2)),
-        "per_class_mse": [float(m) for m in per_class_mse],
-    }
+def run_espdl_test(
+    quant_graph: BaseGraph, dataset, device: str = DEVICE, subsample_ratio: float = 1.0
+) -> dict:
+    """
+    Run quantized (espdl / TorchExecutor) inference over the dataset and report accuracy.
+    """
+    dataset, data_loader = _build_data_loader(dataset, subsample_ratio)
+    quant_executor = TorchExecutor(graph=quant_graph, device=device)
+    all_logits = []
+    all_labels = []
+    for data, target in data_loader:
+        quant_out = quant_executor.forward(inputs=data.to(device))[0]
+        quant_out = quant_out.cpu().numpy()
+        all_logits.append(quant_out)
+        all_labels.append(target.numpy())
+    all_logits = np.concatenate(all_logits, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+    preds = np.argmax(all_logits, axis=1)
+    accuracy = np.mean(preds == all_labels) * 100.0
+    print(f"[espdl] Samples: {len(dataset)}  |  Accuracy: {accuracy:.2f} %")
+    return accuracy
 
 
 # ---------------------------------------------------------------------------
