@@ -40,8 +40,8 @@ def create_quantization_loss_plot(studies_data, title):
             continue
         losses = []
         for rd in sd["results_data"]:
-            fa = rd.get("float_accuracy", np.nan)
-            qa = rd.get("quantized_accuracy", np.nan)
+            fa = rd.get("test_float_accuracy", np.nan)
+            qa = rd.get("test_quantized_accuracy", np.nan)
             if not np.isnan(fa) and not np.isnan(qa):
                 losses.append(fa - qa)
         if not losses:
@@ -101,8 +101,8 @@ def create_quantization_loss_plot(studies_data, title):
         xs = []
         ys = []
         for rd in sd["results_data"]:
-            fa = rd.get("float_accuracy", np.nan)
-            qa = rd.get("quantized_accuracy", np.nan)
+            fa = rd.get("test_float_accuracy", np.nan)
+            qa = rd.get("test_quantized_accuracy", np.nan)
             if not np.isnan(fa) and not np.isnan(qa):
                 xs.append(fa)
                 ys.append(qa)
@@ -123,8 +123,8 @@ def create_quantization_loss_plot(studies_data, title):
 
     # Diagonal (no loss)
     diag_min = min(
-        min(rd.get("float_accuracy", 100) for sd in valid_studies for rd in sd["results_data"]),
-        min(rd.get("quantized_accuracy", 0) for sd in valid_studies for rd in sd["results_data"])
+        min(rd.get("test_float_accuracy", 100) for sd in valid_studies for rd in sd["results_data"]),
+        min(rd.get("test_quantized_accuracy", 0) for sd in valid_studies for rd in sd["results_data"])
     )
     diag_max = 100.0
     ax_scatter.plot([diag_min, diag_max], [diag_min, diag_max],

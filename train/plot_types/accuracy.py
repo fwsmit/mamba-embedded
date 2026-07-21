@@ -9,7 +9,7 @@ from .common import savefig
 
 def _has_quant16(data):
     """Return True if any entry has a valid quantized_accuracy_int16."""
-    return any(not np.isnan(d.get("quantized_accuracy_int16", np.nan)) for d in data)
+    return any(not np.isnan(d.get("test_quantized_accuracy_int16", np.nan)) for d in data)
 
 
 def _bar_groups(data):
@@ -19,7 +19,7 @@ def _bar_groups(data):
     Placing int16 before int8 keeps it adjacent to float for easy comparison.
     """
     # Always present
-    yield [d["float_accuracy"] for d in data], {
+    yield [d["test_float_accuracy"] for d in data], {
         "label": "Full model (f32)", "color": "#4C9BE8",
     }
 
@@ -27,14 +27,14 @@ def _bar_groups(data):
     if _has_quant16(data):
         vals = []
         for d in data:
-            v = d.get("quantized_accuracy_int16", np.nan)
+            v = d.get("test_quantized_accuracy_int16", np.nan)
             vals.append(v if not np.isnan(v) else 0.0)
         yield vals, {
             "label": "Quantized (int16)", "color": "#8E44AD",
         }
 
     # Always present
-    yield [d["quantized_accuracy"] for d in data], {
+    yield [d["test_quantized_accuracy"] for d in data], {
         "label": "Quantized (int8)", "color": "#E8834C",
     }
 
@@ -68,8 +68,8 @@ def create_accuracy_comparison_plot(study_name, data, title, show_mcu=False):
         If True, include MCU accuracy bars when MCU data exists.
     """
     # Filter out entries with NaN float_accuracy
-    data = [d for d in data if not np.isnan(d.get("float_accuracy", np.nan))]
-    data.sort(key=lambda d: d["float_accuracy"], reverse=True)
+    data = [d for d in data if not np.isnan(d.get("test_float_accuracy", np.nan))]
+    data.sort(key=lambda d: d["test_float_accuracy"], reverse=True)
 
     if not data:
         print(f"  No valid accuracy entries found for {study_name}.")

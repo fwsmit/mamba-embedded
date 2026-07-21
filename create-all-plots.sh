@@ -45,11 +45,11 @@ python -m train.plot_arch_search --plot latency --use-param-size config/har/arch
 
 python -m train.plot_arch_search --plot mcu_pareto config/kws/*
 python -m train.plot_arch_search --plot mcu_pareto config/har/*
-python -m train.plot_arch_search --plot accuracy --title "Quantization mamba single direction (KWS)" config/kws/arch-mamba1-kws-2.yaml
-python -m train.plot_arch_search --plot accuracy --title "Quantization mamba bidirectional (add) (KWS)" config/kws/arch-mamba1-kws-bidir.yaml
-python -m train.plot_arch_search --plot accuracy --title "Quantization mamba bidirectional (mul) (KWS)" config/kws/arch-mamba1-kws-bidir-mul.yaml
-python -m train.plot_arch_search --plot accuracy --title "Quantization mamba single direction (HAR)" config/har/arch-mamba1-har.yaml
-python -m train.plot_arch_search --plot accuracy --title "Quantization mamba bidirectional (add) (HAR)" config/har/arch-mamba1-har-bidir.yaml
-python -m train.plot_arch_search --plot accuracy --title "Quantization mamba bidirectional (mul) (HAR)" config/har/arch-mamba1-har-bidir-mul.yaml
+python -m train.plot_arch_search --plot accuracy --title "Quantization Mamba single direction (KWS)" config/kws/arch-mamba1-kws-2.yaml
+python -m train.plot_arch_search --plot accuracy --title "Quantization Mamba bidirectional (add) (KWS)" config/kws/arch-mamba1-kws-bidir.yaml
+python -m train.plot_arch_search --plot accuracy --title "Quantization Mamba bidirectional (mul) (KWS)" config/kws/arch-mamba1-kws-bidir-mul.yaml
+python -m train.plot_arch_search --plot accuracy --title "Quantization Mamba single direction (HAR)" config/har/arch-mamba1-har.yaml
+python -m train.plot_arch_search --plot accuracy --title "Quantization Mamba bidirectional (add) (HAR)" config/har/arch-mamba1-har-bidir.yaml
+python -m train.plot_arch_search --plot accuracy --title "Quantization Mamba bidirectional (mul) (HAR)" config/har/arch-mamba1-har-bidir-mul.yaml
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (HAR)" config/har/*
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" config/kws/*
