@@ -371,6 +371,8 @@ def update_result(
     If no entry exists yet for trial_number, a new one is created.
     Returns the full updated results list.
     """
+
+    print(f"Updating results {trial_number}; {key} = {value}")
     results_path = experiments_dir / "results.json"
 
     results: list[dict] = []
@@ -756,7 +758,6 @@ def process_study(
         dataset, repo_root, n_calib_samples)
 
     # Load previously quantized results to avoid rework
-    results, _ = load_existing_results(experiments_dir)
 
     # Quantize each selected model at each requested precision
     for num_of_bits in num_of_bits_list:
@@ -771,6 +772,7 @@ def process_study(
         print("=" * 62)
         print()
 
+        results, _ = load_existing_results(experiments_dir)
         # Determine which trials already have results for this precision
         done_valid_for_precision = set()
         done_test_for_precision = set()
@@ -782,6 +784,11 @@ def process_study(
                 done_test_for_precision.add(tn)
 
         for tn in selected_trials:
+            if tn in done_valid_for_precision and tn in done_test_for_precision:
+                print(f"  Trial #{tn}: {suffix_desc} already tested on validation and test set, skipping\n")
+                continue
+
+            results, _ = load_existing_results(experiments_dir)
             quant_graph = quantize_trial(tn, study_name, onnx_dir, experiments_dir,
                            calib_loader, val_ds, test_ds, device, results,
                            num_of_bits=num_of_bits, key_suffix=key_suffix)
@@ -791,9 +798,6 @@ def process_study(
                 continue
 
             assert (quant_graph)
-
-            if tn in done_valid_for_precision and tn in done_test_for_precision:
-                print(f"  Trial #{tn}: {suffix_desc} already tested on validation and test set, skipping\n")
 
             if tn not in done_valid_for_precision:
                 print(f"    Evaluating on validation set ...")
@@ -807,6 +811,7 @@ def process_study(
 
     print("All selected models quantized and evaluated.")
 
+    results, _ = load_existing_results(experiments_dir)
     done_valid_for_float = set()
     done_test_for_float = set()
     for entry in results:
@@ -851,6 +856,7 @@ def process_study(
     print("=" * 62)
     print()
 
+    results, _ = load_existing_results(experiments_dir)
     for tn in selected_trials:
         parse_mcu_output(tn, experiments_dir, results, val_labels)
 

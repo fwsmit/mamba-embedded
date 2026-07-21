@@ -36,6 +36,13 @@ python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har.yaml
 python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir.yaml
 python -m train.plot_arch_search --plot latency config/har/arch-mamba1-har-bidir-mul.yaml
 
+python -m train.plot_arch_search --plot latency --use-param-size config/kws/arch-mamba1-kws-2.yaml
+python -m train.plot_arch_search --plot latency --use-param-size config/kws/arch-mamba1-kws-bidir.yaml
+python -m train.plot_arch_search --plot latency --use-param-size config/kws/arch-mamba1-kws-bidir-mul.yaml
+python -m train.plot_arch_search --plot latency --use-param-size config/har/arch-mamba1-har.yaml
+python -m train.plot_arch_search --plot latency --use-param-size config/har/arch-mamba1-har-bidir.yaml
+python -m train.plot_arch_search --plot latency --use-param-size config/har/arch-mamba1-har-bidir-mul.yaml
+
 python -m train.plot_arch_search --plot mcu_pareto config/kws/*
 python -m train.plot_arch_search --plot mcu_pareto config/har/*
 python -m train.plot_arch_search --plot accuracy --title "Quantization mamba single direction (KWS)" config/kws/arch-mamba1-kws-2.yaml

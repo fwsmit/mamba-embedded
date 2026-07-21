@@ -165,6 +165,11 @@ def main():
              "in the Pareto front plot (only valid with --plot pareto)."
     )
     parser.add_argument(
+        "--use-param-size", action="store_true",
+        help="Correlate MCU latency with parameter size instead of PC latency "
+             "(only valid with --plot latency)."
+    )
+    parser.add_argument(
         "--x-field", type=str, default=None,
         help="Field name in results.json for the x-axis (required for --plot scatter)."
     )
@@ -251,7 +256,7 @@ def main():
 
     elif args.plot == "latency":
         load_results_data(studies_data, repo_root)
-        create_latency_correlation_plot(studies_data, title)
+        create_latency_correlation_plot(studies_data, title, use_param_size=args.use_param_size)
         plot_created = True
 
     elif args.plot == "pareto":
