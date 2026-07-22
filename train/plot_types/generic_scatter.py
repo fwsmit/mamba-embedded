@@ -22,15 +22,15 @@ from .common import savefig, slugify, fig_path, fig_pdf_path, FIG_DPI
 # the computed value (or None if the required source fields are missing).
 _COMPUTED_FIELDS = {
     "quantization_loss_int8": lambda rd: (
-        rd.get("float_accuracy", np.nan) - rd.get("quantized_accuracy", np.nan)
-        if not np.isnan(rd.get("float_accuracy", np.nan))
-           and not np.isnan(rd.get("quantized_accuracy", np.nan))
+        rd.get("test_float_accuracy", np.nan) - rd.get("test_quantized_accuracy", np.nan)
+        if not np.isnan(rd.get("test_float_accuracy", np.nan))
+           and not np.isnan(rd.get("test_quantized_accuracy", np.nan))
         else np.nan
     ),
     "quantization_loss_int16": lambda rd: (
-        rd.get("float_accuracy", np.nan) - rd.get("quantized_accuracy_int16", np.nan)
-        if not np.isnan(rd.get("float_accuracy", np.nan))
-           and not np.isnan(rd.get("quantized_accuracy_int16", np.nan))
+        rd.get("test_float_accuracy", np.nan) - rd.get("test_quantized_accuracy_int16", np.nan)
+        if not np.isnan(rd.get("test_float_accuracy", np.nan))
+           and not np.isnan(rd.get("test_quantized_accuracy_int16", np.nan))
         else np.nan
     ),
 }

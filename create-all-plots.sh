@@ -17,8 +17,8 @@ python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-f
 python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field mcu_latency_ms --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Latency on MCU (ms)" --title "Parameter size vs MCU latency (KWS)" config/kws/*
 
 # Scatter: parameter size vs MCU accuracy
-python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field mcu_accuracy --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Accuracy on MCU (%)" --title "Parameter size vs MCU accuracy (HAR)" config/har/*
-python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field mcu_accuracy --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Accuracy on MCU (%)" --title "Parameter size vs MCU accuracy (KWS)" config/kws/*
+python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field test_quantized_accuracy --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Accuracy on MCU (%)" --title "Parameter size vs MCU accuracy (HAR)" config/har/*
+python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field test_quantized_accuracy --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Accuracy on MCU (%)" --title "Parameter size vs MCU accuracy (KWS)" config/kws/*
 
 # Quantization loss
 python -m train.plot_arch_search --plot quantization_loss config/kws/*

@@ -39,14 +39,14 @@ def _bar_groups(data):
     }
 
     # Optional MCU
-    if any(not np.isnan(d.get("mcu_accuracy", np.nan)) for d in data):
-        vals = []
-        for d in data:
-            v = d.get("mcu_accuracy", np.nan)
-            vals.append(v if not np.isnan(v) else 0.0)
-        yield vals, {
-            "label": "MCU Accuracy", "color": "#4CAF50",
-        }
+    # if any(not np.isnan(d.get("mcu_accuracy", np.nan)) for d in data):
+    #     vals = []
+    #     for d in data:
+    #         v = d.get("mcu_accuracy", np.nan)
+    #         vals.append(v if not np.isnan(v) else 0.0)
+    #     yield vals, {
+    #         "label": "MCU Accuracy", "color": "#4CAF50",
+    #     }
 
 
 def create_accuracy_comparison_plot(study_name, data, title, show_mcu=False):

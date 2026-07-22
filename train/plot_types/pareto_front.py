@@ -53,7 +53,7 @@ def create_mcu_pareto_plot(studies_data, title):
     ----------
     studies_data : list of dict
         Each dict has keys: 'name', 'df', 'par', 'results_data' (list of entries
-        from results.json with ``mcu_accuracy`` and ``mcu_latency_ms``),
+        from results.json,
         'color', 'color_par', 'idx'.
     title : str
         Used in the plot title and saved file names.
@@ -139,9 +139,9 @@ def create_mcu_pareto_plot(studies_data, title):
         if sd.get("results_data"):
             mcu_pts = []
             for rd in sd["results_data"]:
-                mcu_acc = rd.get("mcu_accuracy", np.nan)
+                mcu_acc = rd.get("test_quantized_accuracy", np.nan)
                 mcu_lat = rd.get("mcu_latency_ms", np.nan)
-                float_acc = rd.get("float_accuracy", np.nan)
+                float_acc = rd.get("test_float_accuracy", np.nan)
                 if not np.isnan(mcu_acc) and not np.isnan(mcu_lat) and not np.isnan(float_acc):
                     mcu_pts.append((mcu_lat, mcu_acc, float_acc, int(rd["trial_number"])))
 

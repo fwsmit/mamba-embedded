@@ -23,6 +23,7 @@ To build the ESP-DL firmware with a given quantized model, flash it to the devic
 ```
 
 This script:
+
 1. Copies the specified `.espdl` file to `esp-dl/main/model/model.espdl`
 2. Copies the matching `dataset-trial-<N>.bin` (inferred from the model filename) as `dataset.bin` — exits with an error if not found
 3. Sources the ESP-IDF v6.0.1 environment
@@ -120,6 +121,7 @@ To include a dataset:
 2. Run `./run-esp.sh` as normal — the script automatically matches the trial number and copies it as `dataset.bin`; the build system handles flashing both the firmware and the dataset
 
 For manual testing (without `run-esp.sh`), just copy both files:
+
 ```bash
 cp path/to/model.espdl      esp-dl/main/model/
 cp path/to/dataset-trial-N.bin  esp-dl/main/model/dataset.bin
@@ -163,7 +165,7 @@ The `results.json` file is a JSON array of objects, each with:
 | `test_float_accuracy` | Accuracy of the float model on the test set (%) |
 | `test_quantized_accuracy` | Accuracy after int8 quantization on the test set (%) |
 | `test_quantized_accuracy_int16` | Accuracy after int16 quantization on the test set (%) — only present when 16-bit is requested |
-| `mcu_accuracy` | Accuracy measured on ESP32-S3 (%) |
+| `mcu_accuracy` | Accuracy on the validation set measured on ESP32-S3 (%) |
 | `mcu_latency_ms` | Average inference latency on ESP32-S3 (ms) |
 | `mcu_profiling` | Dict of operator-level profiling breakdown (count and total latency in ms per op type) |
 
@@ -201,3 +203,4 @@ These instructions apply to any AI agent working on this repository.
 - **Minimal changes**: Make the smallest possible set of edits to satisfy the task. Do not refactor, reorganise, or beautify code beyond what is strictly required.
 - **Avoid comments**: Do not add code comments unless the logic is genuinely non-obvious and a comment is more maintainable than clearer code.
 - **Keep docs current**: If you modify the project in a way that makes any part of `AGENTS.md` or `README.md` inaccurate, update the affected files to reflect the new state of the world.
+
