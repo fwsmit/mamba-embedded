@@ -313,7 +313,10 @@ def main(cfg: DictConfig):
     SEARCH_SPACE = cfg.SEARCH_SPACE
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}" if EXPERIMENT_NAME else f"{MODEL}-{DATASET}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
-    N_WORKERS = 1 if MODEL == "mamba-1" else 3
+    N_WORKERS = 1
+
+    # Multiprocessing is currently broken
+    # N_WORKERS = 1 if MODEL == "mamba-1" else 3
     N_TRIALS = cfg.n_trials
 
     print(f"Loaded configuration: {cfg}")
