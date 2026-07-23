@@ -93,22 +93,45 @@ def create_mcu_pareto_plot(studies_data, title):
         ax_pc.step(sd["par"]["latency"], sd["par"]["accuracy"],
                    color=sd["color_par"], linewidth=1.8, where="post", zorder=3)
 
-        # MCU-tested trials highlighted with star marker
+        # ── Determine MCU-tested trials with valid MCU data ────────────────
+        mcu_pts = []
+        if sd.get("results_data"):
+            for rd in sd["results_data"]:
+                mcu_acc = rd.get("test_quantized_accuracy", np.nan)
+                mcu_lat = rd.get("mcu_latency_ms", np.nan)
+                float_acc = rd.get("test_float_accuracy", np.nan)
+                if not np.isnan(mcu_acc) and not np.isnan(mcu_lat) and not np.isnan(float_acc):
+                    mcu_pts.append((mcu_lat, mcu_acc, float_acc, int(rd["trial_number"])))
+
+            mcu_pts.sort(key=lambda x: x[0])
+        # Trials that actually appear on the right panel
+        mcu_tns = {p[3] for p in mcu_pts}
+
+        # ── Left panel: MCU-tested trials highlighted with star marker ───────
         mcu_highlight_x = []
         mcu_highlight_y = []
+        mcu_highlight_tn = []
         if sd.get("results_data"):
             for rd in sd["results_data"]:
                 tn = rd["trial_number"]
+                if tn not in mcu_tns:
+                    continue
                 match = sd["df"][sd["df"]["number"] == tn]
                 if len(match) > 0:
                     mcu_highlight_x.append(match.iloc[0]["latency"])
                     mcu_highlight_y.append(match.iloc[0]["accuracy"])
+                    mcu_highlight_tn.append(tn)
 
         if mcu_highlight_x:
             ax_pc.scatter(mcu_highlight_x, mcu_highlight_y,
                           color=sd["color_par"], alpha=1.0, s=130,
                           marker="*", edgecolors="red", linewidths=1.2,
                           zorder=5, label=f"{sd['name']} MCU-tested")
+            for lx, ly, tn in zip(mcu_highlight_x, mcu_highlight_y, mcu_highlight_tn):
+                ax_pc.annotate(str(tn), (lx, ly),
+                               textcoords="offset points", xytext=(8, 8),
+                               fontsize=7, fontweight="bold", color="red",
+                               zorder=6)
             handles_pc = [
                 Line2D([0], [0], marker=MARKER_ALL, color="w",
                        markerfacecolor=sd["color"], alpha=ALPHA_ALL, markersize=7),
@@ -136,32 +159,20 @@ def create_mcu_pareto_plot(studies_data, title):
                        color=sd["color_par"], linewidth=1.8, zorder=3)
 
         # ── Right panel: MCU accuracy vs latency ─────────────────────────────
-        if sd.get("results_data"):
-            mcu_pts = []
-            for rd in sd["results_data"]:
-                mcu_acc = rd.get("test_quantized_accuracy", np.nan)
-                mcu_lat = rd.get("mcu_latency_ms", np.nan)
-                float_acc = rd.get("test_float_accuracy", np.nan)
-                if not np.isnan(mcu_acc) and not np.isnan(mcu_lat) and not np.isnan(float_acc):
-                    mcu_pts.append((mcu_lat, mcu_acc, float_acc, int(rd["trial_number"])))
+        if mcu_pts:
+            lat_vals    = [p[0] for p in mcu_pts]
+            mcu_acc_vals = [p[1] for p in mcu_pts]
 
-            if mcu_pts:
-                mcu_pts.sort(key=lambda x: x[0])  # sort by latency
-                # Only keep points where either float or MCU accuracy is visible in the plot
-                visible_pts = [(lat, mcu_acc, float_acc, tn)
-                               for lat, mcu_acc, float_acc, tn in mcu_pts
-                               if (bot_acc <= float_acc / 100.0 <= top_acc)
-                                  or (bot_acc <= mcu_acc / 100.0 <= top_acc)]
-
-                if visible_pts:
-                    lat_vals    = [p[0] for p in visible_pts]
-                    mcu_acc_vals = [p[1] for p in visible_pts]
-
-                    # Plot MCU accuracy as filled circles
-                    ax_mcu.scatter(lat_vals, [a / 100.0 for a in mcu_acc_vals],
-                                   color=sd["color_par"], alpha=0.9, s=70,
-                                   marker="o", edgecolors="white", linewidths=0.6,
-                                   zorder=4, label=f"{sd['name']} MCU")
+            # Plot MCU accuracy as filled circles
+            ax_mcu.scatter(lat_vals, [a / 100.0 for a in mcu_acc_vals],
+                           color=sd["color_par"], alpha=0.9, s=70,
+                           marker="o", edgecolors="white", linewidths=0.6,
+                           zorder=4, label=f"{sd['name']} MCU")
+            for lat, acc, _, tn_pt in mcu_pts:
+                ax_mcu.annotate(str(tn_pt), (lat, acc / 100.0),
+                                textcoords="offset points", xytext=(6, 6),
+                                fontsize=7, fontweight="bold",
+                                color=sd["color_par"], zorder=5)
 
     # ── Left panel decorations ───────────────────────────────────────────────
     ax_pc.set_ylim(bot_acc, top_acc)
