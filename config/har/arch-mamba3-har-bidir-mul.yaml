@@ -1,0 +1,32 @@
+hydra:
+  job:
+    chdir: false
+  output_subdir: null
+
+BATCHSIZE: 128
+EPOCHS: 20
+MODEL: mamba-3
+DATASET: har
+EXPERIMENT_NAME: "bidir-mul"
+bidirectional: true
+bidirectional_strategy: ew_multiply
+n_trials: 149
+quantization_precision: [8, 16]
+plot_description: "bidirectional (mul)"
+
+SEARCH_SPACE:
+  d_model:
+    low: 8
+    high: 32
+  d_state:
+    low: 8
+    high: 16
+  expand:
+    low: 1
+    high: 4
+  n_layers:
+    low: 1
+    high: 1
+  nheads:
+    low: 1
+    high: 4
