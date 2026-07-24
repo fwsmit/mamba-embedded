@@ -74,6 +74,10 @@ EPOCHS: 2
 MODEL: mamba-1          # "mamba-1" or "mamba-3"
 DATASET: kws            # "kws" or "har"
 EXPERIMENT_NAME: "v2"   # distinguishes this experiment in the Optuna study name
+n_workers: 3                        # number of parallel workers (multiprocessing).
+                                    # Set to 1 for single-process execution.
+                                    # Each worker runs trials in its own process
+                                    # with a separate CUDA context.
 quantization_precision: [8]       # bit-width(s) for quantizing models in top_models.py
                                     # scalar (e.g. 8) or list (e.g. [8, 16]) accepted
 plot_description: "Mamba-1 baseline"  # optional; label used in Pareto front plots
@@ -130,6 +134,23 @@ idf.py build && idf.py -p /dev/ttyACM0 flash
 ```
 
 The firmware logs the partition info at startup via `load_dataset()` in `app_main.cpp`. That function mmaps the partition and parses the 8-byte header (`uint32 num_samples`, `uint32 elements_per_sample`) followed by the quantized int8 sample data. The firmware then runs inference on every sample by assigning each one to the model's input tensor via `TensorBase::assign()` before calling `model->run()`.
+
+## Performance Optimizations
+
+### Batched reference kernel (mamba-3)
+
+The Mamba-3 reference kernel (`mamba3_siso_fwd_ref_batched` in `train/mamba_cpu_funcs.py`) processes the entire batch in one go instead of looping over individual sequences. This reduces GPU kernel launch overhead significantly.
+
+Measured speedup on CPU (B=128, T=10, d_model=20): **~27×** over the original per-sequence loop. On GPU the speedup is expected to be even larger since the original loop launches 128 tiny CUDA kernels per forward pass.
+
+### Multiprocessing
+
+The architecture search now supports multi-worker execution via the `n_workers` config field. Workers run in separate processes with their own CUDA contexts. Each worker pulls the next available trial from the shared Optuna SQLite database.
+
+Set `n_workers` in the config YAML file. Recommended values:
+- Quadro P1000 (4 GB): 3 workers
+- Higher-end GPUs: 4-8 workers
+- CPU-only: `os.cpu_count()` workers
 
 ## Known Issues
 

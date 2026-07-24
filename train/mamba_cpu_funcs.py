@@ -14,17 +14,235 @@ from einops import rearrange, repeat
 
 # Reference Implementations
 def _segsum(x: torch.Tensor) -> torch.Tensor:
-    """Segment sum helper for attention computation."""
+    """Segment sum helper for attention computation.
+
+    Input:  (..., nheads, T)    — any leading dims
+    Output: (..., nheads, T, T)  — causal segsum
+    """
     T = x.size(-1)
-    x = repeat(x, "... d -> ... d e", e=T)
-    # mask = torch.tril(torch.ones(T, T, device=x.device, dtype=bool), diagonal=-1)
-    mask = torch.tril(torch.ones(T, T, device=x.device), diagonal=-1).bool()
+    device = x.device
+    # add a trailing dimension so we can broadcast
+    x = x.unsqueeze(-1)                         # (..., nheads, T, 1)
+    x = x.expand(*x.shape[:-1], T)              # (..., nheads, T, T)
+    # lower-triangular mask with diagonal=-1 (strictly lower)
+    mask = torch.tril(torch.ones(T, T, device=device, dtype=torch.bool), diagonal=-1)
     x = x.masked_fill(~mask, 0)
-    x_segsum = torch.cumsum(x, dim=-2)
-    # mask = torch.tril(torch.ones(T, T, device=x.device, dtype=bool), diagonal=0)
-    mask = torch.tril(torch.ones(T, T, device=x.device), diagonal=0).bool()
+    x_segsum = torch.cumsum(x, dim=-2)           # cumsum over the second-to-last dim (T)
+    # causal mask with diagonal=0
+    mask = torch.tril(torch.ones(T, T, device=device, dtype=torch.bool), diagonal=0)
     x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
     return x_segsum
+
+
+def mamba3_siso_fwd_ref_batched(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    ADT: torch.Tensor,
+    DT: torch.Tensor,
+    Trap: torch.Tensor,
+    Q_bias: torch.Tensor,
+    K_bias: torch.Tensor,
+    Angles: torch.Tensor,
+    D: Optional[torch.Tensor] = None,
+    Z: Optional[torch.Tensor] = None,
+    Initial_States: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    chunk_size: int = 64,
+    dtype: torch.dtype = torch.float32,
+    cu_seqlens: Optional[torch.Tensor] = None,
+):
+    """Vectorised (batched) reference implementation of Mamba-3 forward pass.
+
+    Processes the entire batch in one go instead of looping over sequences.
+    Only the non-varlegth path is vectorised; varlegth falls back to the
+    per-sequence loop of the original implementation.
+
+    Shapes (non-varlegth):
+        Q, K:  (B, T, nheads, d_state)
+        V:     (B, T, nheads, headdim)
+        ADT:   (B, nheads, T)
+        DT:    (B, nheads, T)
+        Trap:  (B, nheads, T)
+        Q_bias, K_bias: (nheads, d_state)
+        Angles: (B, T, nheads, num_rope_angles)
+        D:     (nheads,)
+        Z:     (B, T, nheads, headdim)
+    """
+    batch, total_seqlen, nheads_qk, headdim_qk = Q.shape
+    _, _, nheads, headdim_v = V.shape
+    headdim_angles = Angles.shape[-1]
+    device = Q.device
+
+    # --- varlegth fallback → original per-sequence loop -----------------------
+    if cu_seqlens is not None:
+        return _mamba3_siso_fwd_ref_original(
+            Q, K, V, ADT, DT, Trap, Q_bias, K_bias, Angles,
+            D=D, Z=Z, Initial_States=Initial_States,
+            chunk_size=chunk_size, dtype=dtype, cu_seqlens=cu_seqlens,
+        )
+
+    # --- cast inputs ----------------------------------------------------------
+    Q = Q.to(dtype)
+    K = K.to(dtype)
+    V = V.to(dtype)
+    ADT = ADT.to(torch.float32)
+    DT = DT.to(torch.float32)
+    Trap = Trap.to(dtype)
+    Q_bias = Q_bias.to(dtype)
+    K_bias = K_bias.to(dtype)
+    Angles = Angles.to(dtype)
+    if D is not None:
+        D = D.to(dtype)
+    if Z is not None:
+        Z = Z.to(dtype)
+
+    Angles = torch.tanh(Angles) * math.pi
+
+    # expand Q/K for GQA
+    if Q.shape[2] != V.shape[2]:
+        Q = repeat(Q, "b s h_bc d -> b s (h_bc g) d", g=V.shape[2] // Q.shape[2])
+        K = repeat(K, "b s h_bc d -> b s (h_bc g) d", g=V.shape[2] // K.shape[2])
+
+    B_state = None
+    if Initial_States is not None:
+        Initial_Angle_State, Initial_SSM_State, Initial_K_State, Initial_V_State = Initial_States
+
+    # ---------- 1. sigmoid trap & angle cumsum -------------------------------
+    Trap = torch.sigmoid(Trap)                            # (B, nheads, T)
+
+    # Angles scaled by DT
+    Angles_scaled = Angles.float() * DT.transpose(1, 2).unsqueeze(-1)  # (B, T, nheads, S)
+
+    # Cumulative angle (over time dim = dim=1)
+    Angles_Cumsum = torch.cumsum(Angles_scaled, dim=1)    # (B, T, nheads, S)
+    if Initial_States is not None:
+        Angles_Cumsum = Angles_Cumsum + Initial_Angle_State.unsqueeze(1)  # (B, 1, nheads, S) broadcast
+
+    TWO_PI = 2 * math.pi
+    Angles_Cumsum = Angles_Cumsum - TWO_PI * torch.floor(Angles_Cumsum / TWO_PI)
+
+    Final_Angle_States = Angles_Cumsum[:, -1, :, :]       # (B, nheads, S)
+
+    # ---------- 2. initial acc_states ---------------------------------------
+    if Initial_States is not None:
+        scalar = DT[:, :, 0] * (1 - Trap[:, :, 0])        # (B, nheads)
+        acc_states = (
+            Initial_SSM_State                             # (B, nheads, D, d)
+            + Initial_V_State.unsqueeze(-1)               # (B, nheads, D, 1)
+            * Initial_K_State.unsqueeze(-2)               # (B, nheads, 1, d)
+            * scalar.unsqueeze(-1).unsqueeze(-1)          # (B, nheads, 1, 1)
+        )                                                  # (B, nheads, D, d)
+        D_state = Initial_V_State.shape[-1]               # = headdim_v
+        d_state_qk = Initial_K_State.shape[-1]            # = d_state (headdim_qk)
+    else:
+        acc_states = torch.zeros((batch, nheads, headdim_v, headdim_qk), device=device, dtype=torch.float32)
+
+    # ---------- 3. shifted gamma & scale ------------------------------------
+    DT_shifted = torch.cat([DT[:, :, 1:],
+                            torch.zeros(batch, nheads, 1, device=device, dtype=DT.dtype)], dim=-1)   # (B, nheads, T)
+    Trap_shifted = torch.cat([Trap[:, :, 1:],
+                              torch.zeros(batch, nheads, 1, device=device, dtype=Trap.dtype)], dim=-1)
+    shifted_gamma = DT_shifted * (1 - Trap_shifted)       # (B, nheads, T)
+    scale = DT * Trap + DT_shifted * (1 - Trap_shifted)   # (B, nheads, T)
+
+    # ---------- 4. rotary embeddings -----------------------------------------
+    # Add biases
+    Q = Q + Q_bias.unsqueeze(0).unsqueeze(0)              # (B, T, nheads, d_state)
+    K = K + K_bias.unsqueeze(0).unsqueeze(0)              # (B, T, nheads, d_state)
+
+    # QK dot for skip connection
+    QK_dot = (K * Q).sum(dim=-1) * shifted_gamma.transpose(1, 2)  # (B, T, nheads)
+
+    # Cosine and sine from cumulative angles
+    cos_angles = torch.cos(Angles_Cumsum).to(Q.dtype)    # (B, T, nheads, S)
+    sin_angles = torch.sin(Angles_Cumsum).to(Q.dtype)    # (B, T, nheads, S)
+
+    def _batch_rotary(tensor, cos, sin):
+        """Apply rotary embedding in a vectorised way.
+
+        tensor: (B, T, nheads, d)   where d is even (last dim pairs of 2)
+        cos:    (B, T, nheads, S)   where S = d // 2 (may be less, padded)
+        sin:    (B, T, nheads, S)
+        """
+        *leading, d = tensor.shape
+        tensor_reshaped = tensor.view(*leading, -1, 2)    # (*, d//2, 2)
+        t0 = tensor_reshaped[..., 0]                       # (*, d//2)
+        t1 = tensor_reshaped[..., 1]                       # (*, d//2)
+        S = cos.shape[-1]
+        if S < t0.shape[-1]:
+            pad_size = t0.shape[-1] - S
+            cos = torch.cat([cos, cos.new_ones(*cos.shape[:-1], pad_size)], dim=-1)
+            sin = torch.cat([sin, sin.new_zeros(*sin.shape[:-1], pad_size)], dim=-1)
+        rotated_0 = t0 * cos - t1 * sin
+        rotated_1 = t0 * sin + t1 * cos
+        return torch.stack([rotated_0, rotated_1], dim=-1).view_as(tensor)
+
+    Q = _batch_rotary(Q, cos_angles, sin_angles)
+    K = _batch_rotary(K, cos_angles, sin_angles)
+
+    Final_K_States = K[:, -1, :, :]                       # (B, nheads, d_state)
+    Final_V_States = V[:, -1, :, :]                       # (B, nheads, headdim)
+
+    # ---------- 5. quadratic attention ---------------------------------------
+    # scale K
+    K_scaled = K * scale.transpose(1, 2).unsqueeze(-1).to(K.dtype)  # (B, T, nheads, d_state)
+
+    # QK = Q @ K^T  (batched matmul)
+    QK = torch.matmul(
+        Q.permute(0, 2, 1, 3),                              # (B, nheads, T, d_state)
+        K_scaled.permute(0, 2, 3, 1),                       # (B, nheads, d_state, T)
+    )                                                       # (B, nheads, T, T)
+    QK_causal = torch.tril(QK)                              # (B, nheads, T, T)
+    QK_causal = QK_causal * torch.exp(_segsum(ADT)).to(QK_causal.dtype)
+
+    # out = QK_causal @ V  (batched)
+    out = torch.matmul(
+        QK_causal,                                         # (B, nheads, T, T)
+        V.permute(0, 2, 1, 3),                             # (B, nheads, T, headdim)
+    ).permute(0, 2, 1, 3)                                  # (B, T, nheads, headdim)
+
+    # ---------- 6. initial state contribution --------------------------------
+    if Initial_States is not None:
+        da_cs = torch.cumsum(ADT, dim=-1)                  # (B, nheads, T)
+        exp_da_cs = torch.exp(da_cs)                       # (B, nheads, T)
+        # acc_states: (B, nheads, D, d) where D=headdim_v, d=d_state
+        # Q: (B, T, nheads, d_state)
+        # We want: (B, T, nheads, D) = Q @ acc_states^T
+        init_contrib = torch.matmul(
+            Q.to(acc_states.dtype).permute(0, 2, 1, 3),    # (B, nheads, T, d_state)
+            acc_states.permute(0, 1, 3, 2)                 # (B, nheads, d_state, D)
+        )                                                   # (B, nheads, T, D)
+        init_contrib = init_contrib.permute(0, 2, 1, 3)     # (B, T, nheads, D)
+        init_contrib = init_contrib * exp_da_cs.transpose(1, 2).unsqueeze(-1).to(init_contrib.dtype)  # (B, T, nheads, 1)
+        out = out + init_contrib
+
+    # ---------- 7. D / Z / skip connections ----------------------------------
+    if D is not None:
+        out = out + D[None, None, :, None] * V             # (B, T, nheads, headdim)
+
+    out = out - V * QK_dot.unsqueeze(-1)                   # (B, T, nheads, headdim)
+
+    if Z is not None:
+        out = out * Z * torch.sigmoid(Z)
+
+    # ---------- 8. compute final SSM states ----------------------------------
+    da_cs_last = torch.exp(torch.sum(ADT, dim=-1))               # (B, nheads)
+    da_cs_rev = torch.exp(
+        torch.sum(ADT, dim=-1, keepdim=True) - torch.cumsum(ADT, dim=-1)
+    )                                                              # (B, nheads, T)
+    V_scaled = V * da_cs_rev.transpose(1, 2).unsqueeze(-1).to(V.dtype)  # (B, T, nheads, headdim)
+    Final_SSM_States = (
+        acc_states * da_cs_last.unsqueeze(-1).unsqueeze(-1)
+        + torch.matmul(
+            V_scaled.to(K_scaled.dtype).permute(0, 2, 3, 1),     # (B, nheads, D, T)
+            K_scaled.permute(0, 2, 1, 3),                        # (B, nheads, T, d_state)
+        )
+    )
+
+    return out, (Final_Angle_States, Final_SSM_States, Final_K_States, Final_V_States)
+
+
+# ── original implementation kept for the varlegth path & as a reference ──────
 
 
 def mamba3_siso_step_ref(
@@ -69,8 +287,6 @@ def mamba3_siso_step_ref(
         tensor_1 = tensor_reshaped[..., 1]
         if cos.shape[-1] < tensor_0.shape[-1]:
             pad_size = tensor_0.shape[-1] - cos.shape[-1]
-            # cos = F.pad(cos, (0, pad_size), value=1.0)
-            # sin = F.pad(sin, (0, pad_size), value=0.0)
             cos = torch.cat([cos, cos.new_ones(*cos.shape[:-1], pad_size)], dim=-1)
             sin = torch.cat([sin, sin.new_zeros(*sin.shape[:-1], pad_size)], dim=-1)
         rotated_0 = tensor_0 * cos - tensor_1 * sin
@@ -125,7 +341,6 @@ def mamba3_siso_step_ref(
         SSM_State = SSM_State + gamma.unsqueeze(-1).unsqueeze(-1) * (k_rot.unsqueeze(-2) * v.unsqueeze(-1))
 
         # Compute output
-        # out = torch.einsum("bhdD, bhD -> bhd", SSM_State, q_rot.to(SSM_State.dtype))
         out = torch.matmul(SSM_State, q_rot.to(SSM_State.dtype).unsqueeze(-1)).squeeze(-1)
         
         if D is not None:
@@ -145,7 +360,7 @@ def mamba3_siso_step_ref(
     return out, Final_States
 
 
-def mamba3_siso_fwd_ref(
+def _mamba3_siso_fwd_ref_original(
     Q: torch.Tensor,
     K: torch.Tensor,
     V: torch.Tensor,
@@ -162,14 +377,9 @@ def mamba3_siso_fwd_ref(
     dtype: torch.dtype = torch.float32,
     cu_seqlens: Optional[torch.Tensor] = None,
 ):
-    """Reference implementation of Mamba-3 forward pass.
-    
-    Args:
-        Initial_States: Optional tuple of (Angle_State, SSM_State, K_State, V_State)
-    
-    Returns:
-        out_z: Output with Z gating applied
-        final_states: (Final_Angle_State, Final_SSM_State, Final_K_State, Final_V_State)
+    """Original per-sequence loop implementation — kept as a fallback.
+
+    See ``mamba3_siso_fwd_ref`` for full docstring.
     """
     batch, total_seqlen, nheads_qk, headdim_qk = Q.shape
     _, _, nheads, headdim_v = V.shape
@@ -218,8 +428,6 @@ def mamba3_siso_fwd_ref(
         tensor_1 = tensor_reshaped[..., 1]
         if cos.shape[-1] < tensor_0.shape[-1]:
             pad_size = tensor_0.shape[-1] - cos.shape[-1]
-            # cos = F.pad(cos, (0, pad_size), value=1.0)
-            # sin = F.pad(sin, (0, pad_size), value=0.0)
             cos = torch.cat([cos, cos.new_ones(*cos.shape[:-1], pad_size)], dim=-1)
             sin = torch.cat([sin, sin.new_zeros(*sin.shape[:-1], pad_size)], dim=-1)
         rotated_0 = tensor_0 * cos - tensor_1 * sin
@@ -270,8 +478,6 @@ def mamba3_siso_fwd_ref(
             acc_states = torch.zeros((nheads, headdim_v, headdim_qk), device=device, dtype=torch.float32)
 
         # Compute shifted gamma and scale
-        # DT_shifted = F.pad(DT_curr[:, 1:], (0, 1))
-        # Trap_shifted = F.pad(Trap_curr[:, 1:], (0, 1))
         DT_shifted   = torch.cat([DT_curr[:, 1:],   DT_curr.new_zeros(DT_curr.shape[0],   1)], dim=1)
         Trap_shifted = torch.cat([Trap_curr[:, 1:], Trap_curr.new_zeros(Trap_curr.shape[0], 1)], dim=1)
         shifted_gamma = DT_shifted * (1 - Trap_shifted)
@@ -296,12 +502,10 @@ def mamba3_siso_fwd_ref(
         K_curr_scaled = K_curr * scale.transpose(0, 1).unsqueeze(-1).to(K_curr.dtype)
 
         # Compute output via quadratic attention
-        # QK = torch.einsum("thd,shd->hts", Q_curr, K_curr_scaled)
         QK = torch.matmul(Q_curr.permute(1, 0, 2),          # (h, t, d)
                   K_curr_scaled.permute(1, 2, 0))    # (h, d, s)  →  (h, t, s)
         QK_causal = torch.tril(QK)
         QK_causal = (QK_causal * torch.exp(_segsum(ADT_curr))).to(QK_causal.dtype)
-        # out = torch.einsum("hts,shd->thd", QK_causal, V_curr)
         out = torch.matmul(QK_causal,                        # (h, t, s)
                    V_curr.permute(1, 0, 2)           # (h, s, d)  →  (h, t, d)
                   ).permute(1, 0, 2)                 # → (t, h, d)
@@ -309,7 +513,6 @@ def mamba3_siso_fwd_ref(
         if Initial_States is not None:
             da_cs = torch.cumsum(ADT_curr, dim=-1)
             exp_da_cs = torch.exp(da_cs)
-            # out = out + torch.einsum("hDd,thd,ht->thD", acc_states.to(Q_curr.dtype), Q_curr, exp_da_cs.to(Q_curr.dtype))
             out = out + (torch.matmul(Q_curr.to(acc_states.dtype).permute(1, 0, 2),   # (h, t, d)
                             acc_states.permute(0, 2, 1)                      # (h, d, D)  →  (h, t, D)
                 ).permute(1, 0, 2)                                            # → (t, h, D)
@@ -329,8 +532,6 @@ def mamba3_siso_fwd_ref(
         da_cs_last = torch.exp(torch.sum(ADT_curr, dim=-1))
         da_cs_rev = torch.exp(torch.sum(ADT_curr, dim=-1, keepdim=True) - torch.cumsum(ADT_curr, dim=-1))
         V_curr_scaled = V_curr * da_cs_rev.permute(1, 0).unsqueeze(-1).to(V_curr.dtype)
-        # final_acc_states = acc_states * da_cs_last.unsqueeze(-1).unsqueeze(-1) + torch.einsum(
-        #     "thd,thD->hDd", K_curr_scaled, V_curr_scaled.to(K_curr_scaled.dtype))
         final_acc_states = (
             acc_states * da_cs_last.unsqueeze(-1).unsqueeze(-1)
             + torch.matmul(V_curr_scaled.to(K_curr_scaled.dtype).permute(1, 2, 0),  # (h, D, t)
@@ -356,6 +557,41 @@ def mamba3_siso_fwd_ref(
         Final_V_States = torch.stack(Final_V_States, dim=0)
 
     return out_zs, (Final_Angle_States, Final_SSM_States, Final_K_States, Final_V_States)
+
+
+def mamba3_siso_fwd_ref(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    ADT: torch.Tensor,
+    DT: torch.Tensor,
+    Trap: torch.Tensor,
+    Q_bias: torch.Tensor,
+    K_bias: torch.Tensor,
+    Angles: torch.Tensor,
+    D: Optional[torch.Tensor] = None,
+    Z: Optional[torch.Tensor] = None,
+    Initial_States: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    chunk_size: int = 64,
+    dtype: torch.dtype = torch.float32,
+    cu_seqlens: Optional[torch.Tensor] = None,
+):
+    """Reference implementation of Mamba-3 forward pass.
+
+    Dispatches to the batched implementation for non-varlegth inputs
+    and falls back to the original per-sequence loop for varlegth inputs.
+    """
+    if cu_seqlens is not None:
+        return _mamba3_siso_fwd_ref_original(
+            Q, K, V, ADT, DT, Trap, Q_bias, K_bias, Angles,
+            D=D, Z=Z, Initial_States=Initial_States,
+            chunk_size=chunk_size, dtype=dtype, cu_seqlens=cu_seqlens,
+        )
+    return mamba3_siso_fwd_ref_batched(
+        Q, K, V, ADT, DT, Trap, Q_bias, K_bias, Angles,
+        D=D, Z=Z, Initial_States=Initial_States,
+        chunk_size=chunk_size, dtype=dtype, cu_seqlens=cu_seqlens,
+    )
 
 
 # API compatibility

@@ -18,12 +18,16 @@ from multiprocessing import Pool, set_start_method
 from omegaconf import DictConfig, OmegaConf
 from mamba_ssm import Mamba, Mamba3
 
+import torch as _torch
+
 from .models import MambaWrapper
 from .data import get_data_input_size, get_data_output_size, load_har_data, load_speechcommands_data
 from .train import train, test
 from .onnx_utils import export_onnx
 
 from filelock import FileLock
+from types import SimpleNamespace
+
 _device_lock = FileLock("/tmp/mcu.lock")
 
 
@@ -42,6 +46,13 @@ ONNX_DIR = None
 N_WORKERS = None
 N_TRIALS = None
 SEARCH_SPACE = None
+
+def _dict_to_namespace(d):
+    """Recursively convert a nested dict to a SimpleNamespace with attribute access."""
+    if not isinstance(d, dict):
+        return d
+    return SimpleNamespace(**{k: _dict_to_namespace(v) for k, v in d.items()})
+
 
 STORAGE_URL = "sqlite:///mamba_hpo.db"
 
@@ -184,11 +195,11 @@ def run_on_device(timeout: float = 120.0):
 def _suggest_from_space(trial, name, space):
     if space.low == space.high:
         return space.low
-    if "choices" in space:
-        return trial.suggest_categorical(name, space["choices"])
-    if "step" in space:
-        return trial.suggest_int(name, space["low"], space["high"], step=space["step"])
-    return trial.suggest_int(name, space["low"], space["high"])
+    if hasattr(space, "choices"):
+        return trial.suggest_categorical(name, space.choices)
+    if hasattr(space, "step"):
+        return trial.suggest_int(name, space.low, space.high, step=space.step)
+    return trial.suggest_int(name, space.low, space.high)
 
 
 def define_mamba1_model(trial, search_space):
@@ -283,12 +294,29 @@ def objective(trial):
     return accuracy, latency_us
 
 
-def run_optimization(_):
-    study = optuna.load_study(
-        study_name=STUDY_NAME,
-        storage=STORAGE_URL,
-        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
-    )
+def _run_optimization_with_study(cfg_dict, study):
+    """Set globals from cfg_dict and run optimisation on the given study."""
+    _torch.set_num_threads(os.cpu_count())
+
+    global BATCHSIZE, EPOCHS, MODEL, DATASET, EXPERIMENT_NAME
+    global BIDIRECTIONAL, BIDIRECTIONAL_STRATEGY
+    global STUDY_NAME, ONNX_DIR, N_TRIALS, SEARCH_SPACE
+    global dataset_dir
+
+    BATCHSIZE       = cfg_dict["BATCHSIZE"]
+    EPOCHS          = cfg_dict["EPOCHS"]
+    MODEL           = cfg_dict["MODEL"]
+    DATASET         = cfg_dict["DATASET"]
+    EXPERIMENT_NAME = cfg_dict["EXPERIMENT_NAME"]
+    BIDIRECTIONAL   = cfg_dict.get("bidirectional", False)
+    BIDIRECTIONAL_STRATEGY = cfg_dict.get("bidirectional_strategy", None)
+    SEARCH_SPACE    = _dict_to_namespace(cfg_dict["SEARCH_SPACE"])
+    STUDY_NAME      = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}" if EXPERIMENT_NAME else f"{MODEL}-{DATASET}"
+    ONNX_DIR        = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
+    N_TRIALS        = cfg_dict["n_trials"]
+    dataset_dir     = os.path.expanduser("~/Datasets")
+
+    os.makedirs(ONNX_DIR, exist_ok=True)
     completed = study.get_trials(deepcopy=False, states=(optuna.trial.TrialState.COMPLETE,))
     if len(completed) >= N_TRIALS:
         print(f"[worker] Study already has {len(completed)} completed trials (max {N_TRIALS}), skipping.")
@@ -297,6 +325,16 @@ def run_optimization(_):
         objective,
         callbacks=[optuna.study.MaxTrialsCallback(N_TRIALS, states=(optuna.trial.TrialState.COMPLETE,))]
     )
+
+
+def run_optimization_worker(cfg_dict):
+    """Entry point for multiprocessing workers: load study then run trials."""
+    study = optuna.load_study(
+        study_name=f"{cfg_dict['MODEL']}-{cfg_dict['DATASET']}-{cfg_dict['EXPERIMENT_NAME']}" if cfg_dict["EXPERIMENT_NAME"] else f"{cfg_dict['MODEL']}-{cfg_dict['DATASET']}",
+        storage=STORAGE_URL,
+        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+    )
+    _run_optimization_with_study(cfg_dict, study)
 
 
 def main(cfg: DictConfig):
@@ -313,11 +351,10 @@ def main(cfg: DictConfig):
     SEARCH_SPACE = cfg.SEARCH_SPACE
     STUDY_NAME = f"{MODEL}-{DATASET}-{EXPERIMENT_NAME}" if EXPERIMENT_NAME else f"{MODEL}-{DATASET}"
     ONNX_DIR = os.path.join(os.path.expanduser("~/Models"), STUDY_NAME)
-    N_WORKERS = 1
-
-    # Multiprocessing is currently broken
-    # N_WORKERS = 1 if MODEL == "mamba-1" else 3
+    N_WORKERS = cfg.get("n_workers", 1)
     N_TRIALS = cfg.n_trials
+
+    _torch.set_num_threads(os.cpu_count())
 
     print(f"Loaded configuration: {cfg}")
 
@@ -343,13 +380,27 @@ def main(cfg: DictConfig):
     print(f"  Study name     : {STUDY_NAME}")
     print()
 
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+
     if N_WORKERS > 1:
-        # Make multiprocessing work with cuda
-        set_start_method("spawn")
+        # Each worker runs its own trial loop in a separate process.
+        # The spawn start method ensures a clean CUDA context per worker
+        # and avoids GIL contention on CPU-heavy operations.
+        try:
+            set_start_method("spawn")
+        except RuntimeError:
+            pass  # already set
         with Pool(processes=N_WORKERS) as pool:
-            pool.map(run_optimization, range(N_WORKERS))
+            pool.map(run_optimization_worker, [cfg_dict] * N_WORKERS)
     else:
-        run_optimization(0)
+        _run_optimization_with_study(cfg_dict, study)
+
+    # Reload study from DB (in case workers modified it)
+    study = optuna.load_study(
+        study_name=STUDY_NAME,
+        storage=STORAGE_URL,
+        sampler=optunahub.load_module("samplers/auto_sampler").AutoSampler(),
+    )
 
     pruned_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED])
     complete_trials = study.get_trials(deepcopy=False, states=[TrialState.COMPLETE])
