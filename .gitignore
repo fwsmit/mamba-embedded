@@ -50,3 +50,6 @@ experiments/
 .zprofile
 .zshrc
 home/
+experiments-backup-*/
+figures-backup/
+mamba_hpo-backup-*.db

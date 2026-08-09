@@ -12,49 +12,17 @@ def _has_quant16(data):
     return any(not np.isnan(d.get("test_quantized_accuracy_int16", np.nan)) for d in data)
 
 
-def _bar_groups(data):
-    """Yield (values, kwargs) tuples for each bar group.
+def _has_quant_strat(data):
+    """Return True if any entry has a valid test_quantized_accuracy_strat."""
+    return any(not np.isnan(d.get("test_quantized_accuracy_strat", np.nan)) for d in data)
 
-    Yield order: float, (int16 if available), int8, (mcu if available).
-    Placing int16 before int8 keeps it adjacent to float for easy comparison.
+
+def create_accuracy_comparison_plot(study_name, data, title):
     """
-    # Always present
-    yield [d["test_float_accuracy"] for d in data], {
-        "label": "Full model (f32)", "color": "#4C9BE8",
-    }
-
-    # Optional int16 — before int8 so it sits next to float
-    if _has_quant16(data):
-        vals = []
-        for d in data:
-            v = d.get("test_quantized_accuracy_int16", np.nan)
-            vals.append(v if not np.isnan(v) else 0.0)
-        yield vals, {
-            "label": "Quantized (int16)", "color": "#8E44AD",
-        }
-
-    # Always present
-    yield [d["test_quantized_accuracy"] for d in data], {
-        "label": "Quantized (int8)", "color": "#E8834C",
-    }
-
-    # Optional MCU
-    # if any(not np.isnan(d.get("mcu_accuracy", np.nan)) for d in data):
-    #     vals = []
-    #     for d in data:
-    #         v = d.get("mcu_accuracy", np.nan)
-    #         vals.append(v if not np.isnan(v) else 0.0)
-    #     yield vals, {
-    #         "label": "MCU Accuracy", "color": "#4CAF50",
-    #     }
-
-
-def create_accuracy_comparison_plot(study_name, data, title, show_mcu=False):
-    """
-    Plot float_accuracy vs quantized_accuracy for all models in a results.json.
-    Also plots mcu_accuracy if available (on-device inference accuracy) and
-    ``show_mcu`` is True.  When the data contains ``quantized_accuracy_int16``,
-    a separate bar for 16-bit quantized accuracy is included.
+    Scatter plot of quantized accuracy (y) vs float accuracy (x) for all
+    models in a results.json.  Each quantization method (int8, and int16 /
+    strat-kl-tqt when present) is shown as a differently-coloured set of
+    points.  A dotted y=x reference line is drawn for comparison.
 
     Parameters
     ----------
@@ -64,58 +32,60 @@ def create_accuracy_comparison_plot(study_name, data, title, show_mcu=False):
         Entries from results.json with float_accuracy and quantized_accuracy.
     title : str
         Used in the plot title and saved file names.
-    show_mcu : bool
-        If True, include MCU accuracy bars when MCU data exists.
     """
-    # Filter out entries with NaN float_accuracy
     data = [d for d in data if not np.isnan(d.get("test_float_accuracy", np.nan))]
-    data.sort(key=lambda d: d["test_float_accuracy"], reverse=True)
+    data = [d for d in data if not np.isnan(d.get("test_quantized_accuracy", np.nan))]
 
     if not data:
         print(f"  No valid accuracy entries found for {study_name}.")
         return
 
-    # Build bar groups — optionally include MCU only if show_mcu is True
-    groups = []
-    for vals, kwargs in _bar_groups(data):
-        lbl = kwargs["label"]
-        if lbl == "MCU Accuracy" and not show_mcu:
-            continue
-        groups.append((vals, kwargs))
+    fig, ax = plt.subplots(figsize=(7, 6))
 
-    n_groups = len(groups)
-    trial_labels = [str(d["trial_number"]) for d in data]
-    x = np.arange(len(data))
+    # y = x reference line
+    lo = min(
+        min(d["test_float_accuracy"] for d in data),
+        min(d["test_quantized_accuracy"] for d in data),
+    )
+    hi = max(
+        max(d["test_float_accuracy"] for d in data),
+        max(d["test_quantized_accuracy"] for d in data),
+    )
+    pad = max(1.0, (hi - lo) * 0.05)
+    lo -= pad
+    hi += pad
+    ax.plot([lo, hi], [lo, hi], linestyle=":", color="grey", linewidth=1.2)
 
-    # Figure size scales slightly with number of groups
-    fig_width = 10 + max(0, n_groups - 2) * 1.5
-    fig, ax = plt.subplots(figsize=(fig_width, 5))
+    # Quantized (int8)
+    ax.scatter([d["test_float_accuracy"] for d in data],
+               [d["test_quantized_accuracy"] for d in data],
+               s=45, color="#E8834C", edgecolor="white", linewidth=0.5,
+               label="Quantized (int8)")
 
-    # Bar width and offsets: cluster centered around each tick
-    width = {2: 0.35, 3: 0.25, 4: 0.20}.get(n_groups, 0.20)
-    all_bars = []
-    for i, (vals, kwargs) in enumerate(groups):
-        offset = (i - (n_groups - 1) / 2) * width
-        bars = ax.bar(x + offset, vals, width,
-                      label=kwargs["label"], color=kwargs["color"],
-                      edgecolor="white")
-        all_bars.append(bars)
+    # Optional quantized (int16)
+    if _has_quant16(data):
+        x16 = [d["test_float_accuracy"] for d in data]
+        y16 = [d.get("test_quantized_accuracy_int16", np.nan) for d in data]
+        mask = [not np.isnan(v) for v in y16]
+        ax.scatter([v for v, m in zip(x16, mask) if m],
+                   [v for v, m in zip(y16, mask) if m],
+                   s=45, color="#8E44AD", edgecolor="white", linewidth=0.5,
+                   label="Quantized (int16)")
 
-    ax.set_ylabel("Accuracy (%)", fontsize=11)
-    ax.set_xlabel("Trial (sorted by float accuracy)", fontsize=11)
+    # Optional strat-kl-tqt quantized
+    if _has_quant_strat(data):
+        xs = [d["test_float_accuracy"] for d in data]
+        ys = [d.get("test_quantized_accuracy_strat", np.nan) for d in data]
+        mask = [not np.isnan(v) for v in ys]
+        ax.scatter([v for v, m in zip(xs, mask) if m],
+                   [v for v, m in zip(ys, mask) if m],
+                   s=45, color="#2E7D32", edgecolor="white", linewidth=0.5,
+                   label="Quantized (strat-kl-tqt)")
+
+    ax.set_xlabel("Float Accuracy (%)", fontsize=11)
+    ax.set_ylabel("Quantized Accuracy (%)", fontsize=11)
     ax.set_title(title, fontsize=13, fontweight="bold")
-    ax.set_xticks(x)
-    ax.set_xticklabels(trial_labels, rotation=45, ha="right", fontsize=8)
-    ax.set_ylim(0, 105)
     ax.legend(fontsize=10)
-    ax.grid(axis="y", alpha=0.3, linestyle="--")
-
-    # Annotate bars with the accuracy value
-    for bars in all_bars:
-        for bar in bars:
-            h = bar.get_height()
-            if h > 0:
-                ax.text(bar.get_x() + bar.get_width() / 2, h + 0.5, f"{h:.1f}",
-                        ha="center", va="bottom", fontsize=6)
+    ax.grid(alpha=0.3, linestyle="--")
 
     savefig(fig, title, "accuracy")

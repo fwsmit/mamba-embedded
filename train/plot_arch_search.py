@@ -28,9 +28,11 @@ import json
 import warnings
 
 from .plot_types.profiling import create_profiling_plot
+from .plot_types.stacked_profiling import create_stacked_profiling_plot
 from .plot_types.common import create_out_dirs
 from .plot_types.generic_scatter import create_generic_scatter_plot
 from .plot_types.accuracy import create_accuracy_comparison_plot
+from .plot_types.accuracy_grid import create_accuracy_grid_plot
 from .plot_types.quantization_loss import create_quantization_loss_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
 from .plot_types.latency_correlation import create_latency_correlation_plot
@@ -133,13 +135,15 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "mcu_pareto", "latency", "scatter", "profiling", "quantization_loss"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
+             "'accuracy_grid' (combined accuracy subplot grid sharing axes), "
              "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot), "
              "'latency' (PC latency vs MCU latency scatter plot), "
              "'scatter' (generic scatter plot of two results.json fields), "
-             "'profiling' (MCU operator profiling bar chart for a specific trial), or "
+             "'profiling' (MCU operator profiling bar chart for a specific trial), "
+             "'stacked' (MCU operator latency stacked by trial across all MCU-tested trials), or "
              "'quantization_loss' (quantization loss comparison across studies)."
     )
     parser.add_argument(
@@ -152,13 +156,11 @@ def main():
         help="Display the plot(s) on screen (default: only save to disk)."
     )
     parser.add_argument(
-        "--mcu", action="store_true",
-        help="Include on-device MCU accuracy bars in the accuracy plot (default: off)."
-    )
-    parser.add_argument(
         "--trial", type=int, default=None,
         help="Trial number for the 'profiling' plot."
     )
+    parser.add_argument("--absolute", action="store_true", default=False,
+                        help="For --plot stacked: plot summed latency (ms) instead of normalised %.")
     parser.add_argument(
         "--use-mcu", action="store_true",
         help="Use MCU accuracy and latency from results.json instead of PC objectives "
@@ -244,10 +246,15 @@ def main():
         load_results_data(studies_data, repo_root)
         for sd in studies_data:
             if sd.get("results_data"):
-                create_accuracy_comparison_plot(sd["name"], sd["results_data"], title, show_mcu=args.mcu)
+                create_accuracy_comparison_plot(sd["name"], sd["results_data"], title)
                 plot_created = True
             else:
                 print(f"  No results.json found for {sd['name']}, skipping.")
+
+    elif args.plot == "accuracy_grid":
+        load_results_data(studies_data, repo_root)
+        create_accuracy_grid_plot(studies_data, title)
+        plot_created = True
 
     elif args.plot == "mcu_pareto":
         load_results_data(studies_data, repo_root)
@@ -317,6 +324,20 @@ def main():
         print(f"  Profiling trial {args.trial} from study {study_name}")
 
         if create_profiling_plot(study_name, args.configs[0], args.trial, display_name):
+            plot_created = True
+
+    elif args.plot == "stacked":
+        # ── MCU operator latency stacked by trial across all MCU-tested trials ──
+        if len(args.configs) != 1:
+            parser.error("stacked plot requires exactly one config file.")
+
+        meta = load_study_meta(args.configs[0])
+        study_name = meta["study_name"]
+        display_name = meta["display_name"]
+        print(f"  Stacked profiling across trials from study {study_name}")
+
+        if create_stacked_profiling_plot(study_name, args.configs[0], display_name,
+                                         absolute=args.absolute):
             plot_created = True
 
     if not plot_created:

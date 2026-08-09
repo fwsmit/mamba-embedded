@@ -1,6 +1,7 @@
 from esp_ppq.api import export_ppq_graph
 from esp_ppq.IR import BaseGraph, Operation
 # from esp_ppq.passes import QuantizationOptimizationPass
+from esp_ppq.api.setting import QuantizationSettingFactory
 from esp_ppq.core import TargetPlatform
 import argparse
 import re
@@ -11,10 +12,9 @@ from pathlib import Path
 import numpy as np
 import onnx
 import onnxruntime as ort
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 from esp_ppq.api import espdl_quantize_onnx
 import torch
-from torch.utils.data import Subset
 from .data import load_har_data, load_speechcommands_data
 
 from esp_ppq.executor import TorchExecutor
@@ -34,6 +34,19 @@ CALIB_STEPS = 32
 CALIB_BATCH = 1
 
 RANDOM_SEED = 42
+
+# ---------------------------------------------------------------------------
+# Best-performing 8-bit PTQ configuration
+# (see TQT_FINAL_REPORT.md): all-INT8, KL calibration over a stratified
+# class-balanced calibration set, followed by a TrainedQuantizationThreshold
+# pass over a single graph-wide block.
+# ---------------------------------------------------------------------------
+TQT_BLOCK_SIZE = 512
+TQT_STEPS = 3000
+TQT_LR = 2e-4
+BEST_CALIB_ALGORITHM = "kl"
+BEST_CALIB_SAMPLES = 256
+BEST_CALIB_STEPS = 256
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -165,16 +178,43 @@ def collate_fn(batch):
     return x.to(DEVICE)
 
 
+def _materialize_subset(dataset, indices: list[int]):
+    """Copy the samples at *indices* into a compact ``TensorDataset``.
+
+    Unlike a ``torch.utils.data.Subset``, the result does not keep a reference
+    to the parent dataset, so a large (e.g. multi-GB) training set can be
+    garbage-collected after the calibration subset is built.
+    """
+    xs = []
+    ys = []
+    for i in indices:
+        x, y = dataset[i]
+        xs.append(x)
+        ys.append(y)
+    X = torch.stack(xs)
+    if isinstance(ys[0], torch.Tensor):
+        Y = torch.stack(ys)
+    else:
+        Y = torch.tensor(ys)
+    return TensorDataset(X, Y)
+
+
 def load_calibration(
     dataset: str,
     root: Path,
     n_samples: int,
+    train_ds=None,
 ):
     """
     Build calibration dataloader from existing datasets.
+
+    If *train_ds* is given (a previously loaded training split), it is reused
+    instead of re-loading the training set, so a multi-GB dataset is only read
+    once even when several calibration loaders are required.
     """
 
-    train_ds = load_datasets(dataset, split="train")
+    if train_ds is None:
+        train_ds = load_datasets(dataset, split="train")
 
     rng = np.random.default_rng(RANDOM_SEED)
 
@@ -184,7 +224,7 @@ def load_calibration(
         replace=False,
     )
 
-    calib_ds = Subset(train_ds, indices.tolist())
+    calib_ds = _materialize_subset(train_ds, indices.tolist())
 
     loader = DataLoader(
         calib_ds,
@@ -194,6 +234,70 @@ def load_calibration(
     )
 
     return loader
+
+
+def stratify_calib_indices(labels, n: int, seed: int = RANDOM_SEED) -> np.ndarray:
+    """
+    Select ``n`` class-balanced, spread-maximising calibration indices.
+
+    Unlike uniform-random subsetting (which is noisy for small calibration
+    sets and can swing accuracy by several points), this picks one equal
+    quota per distinct label and then strides evenly through each class so
+    the calibration set covers as many different labels as possible while
+    spreading samples within each class. Only needs the label vector, so it
+    carries over to any labelled dataset.
+    """
+    from collections import defaultdict
+
+    labels = np.asarray(labels)
+    groups = defaultdict(list)
+    for i, lbl in enumerate(labels.tolist()):
+        groups[lbl].append(i)
+    classes = sorted(groups.keys())
+    base, rem = divmod(n, len(classes))
+    rng = np.random.default_rng(seed)
+    bonus = set(rng.permutation(classes)[:rem].tolist())
+    chosen = []
+    for cls in classes:
+        arr = groups[cls]
+        quota = base + (1 if cls in bonus else 0)
+        if quota <= 0:
+            continue
+        if len(arr) <= quota:
+            chosen.extend(arr)
+        else:
+            step = len(arr) / quota
+            chosen.extend(arr[int(step * i)] for i in range(quota))
+    return np.array(chosen, dtype=np.int64)
+
+
+def load_calibration_stratified(
+    dataset: str,
+    root: Path,
+    n_samples: int = BEST_CALIB_SAMPLES,
+    split: str = "train",
+    seed: int = RANDOM_SEED,
+    train_ds=None,
+):
+    """
+    Build a class-balanced, spread-maximising calibration dataloader.
+
+    This is the calibration used by the best-performing 8-bit config: it
+    selects ``n_samples`` samples stratified over the labels instead of
+    uniformly at random.  If *train_ds* is given it is reused instead of
+    re-loading the training set.
+    """
+    if train_ds is None:
+        train_ds = load_datasets(dataset, split=split)
+    labels = np.array([y for _, y in train_ds])
+    indices = stratify_calib_indices(labels, min(n_samples, len(train_ds)), seed=seed)
+    calib_ds = _materialize_subset(train_ds, indices.tolist())
+    return DataLoader(
+        calib_ds,
+        batch_size=CALIB_BATCH,
+        shuffle=False,
+        drop_last=False,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -497,6 +601,88 @@ def quantize_onnx_to_espdl(
         target=target,
         num_of_bits=num_of_bits,
         collate_fn=collate_fn,
+        device=device,
+        export_test_values=True,
+        error_report=True,
+        skip_export=False,
+        verbose=0,
+        dispatching_override=None,
+    )
+
+    return quant_graph
+
+
+# ---------------------------------------------------------------------------
+# Best-performing 8-bit quantization
+# ---------------------------------------------------------------------------
+
+
+def quantize_onnx_to_espdl_best(
+    onnx_path: str | Path,
+    espdl_path: str | Path,
+    calib_loader: DataLoader,
+    calib_steps: int = BEST_CALIB_STEPS,
+    input_shape: list[int] | None = None,
+    target: str = TARGET,
+    num_of_bits: int = NUM_OF_BITS,
+    device: str = DEVICE,
+    collate_fn=collate_fn,
+    tqt_block_size: int = TQT_BLOCK_SIZE,
+    tqt_steps: int = TQT_STEPS,
+    tqt_lr: float = TQT_LR,
+    calib_algorithm: str = BEST_CALIB_ALGORITHM,
+) -> BaseGraph:
+    """
+    Quantize an ONNX model to ESP-DL .espdl format using the best-performing
+    8-bit config found (see TQT_FINAL_REPORT.md).
+
+    Reproduces the winning config from ``quantize_kws_espdl.py``:
+      * fully INT8 (no INT16 scan ops),
+      * a KL-divergence calibration algorithm,
+      * a single graph-wide TrainedQuantizationThresholdPass block
+        (``block_size=512``, ``steps=3000``, ``lr=2e-4``).
+
+    Use with ``load_calibration_stratified`` for the matched stratified
+    calibration set; the default hyperparameters reproduce the reported
+    accuracy on the KWS test model.
+
+    Parameters
+    ----------
+    Same as ``quantize_onnx_to_espdl``, plus ``tqt_*`` and ``calib_algorithm``
+    overrides for the TQT pass.
+
+    Returns
+    -------
+    BaseGraph
+        The quantized PPQ graph.
+    """
+    onnx_path = Path(onnx_path)
+    espdl_path = Path(espdl_path)
+
+    if input_shape is None:
+        input_shape = infer_input_shape(onnx_path)
+
+    espdl_path.parent.mkdir(parents=True, exist_ok=True)
+
+    setting = QuantizationSettingFactory.espdl_setting()
+    setting.quantize_activation_setting.calib_algorithm = calib_algorithm
+    setting.quantize_parameter_setting.calib_algorithm = calib_algorithm
+    setting.tqt_optimization = True
+    setting.tqt_optimization_setting.block_size = tqt_block_size
+    setting.tqt_optimization_setting.steps = tqt_steps
+    setting.tqt_optimization_setting.lr = tqt_lr
+    setting.tqt_optimization_setting.collecting_device = device
+
+    quant_graph = espdl_quantize_onnx(
+        onnx_import_file=str(onnx_path),
+        espdl_export_file=str(espdl_path),
+        calib_dataloader=calib_loader,
+        calib_steps=calib_steps,
+        input_shape=input_shape,
+        target=target,
+        num_of_bits=num_of_bits,
+        collate_fn=collate_fn,
+        setting=setting,
         device=device,
         export_test_values=True,
         error_report=True,

@@ -80,6 +80,13 @@ n_workers: 3                        # number of parallel workers (multiprocessin
                                     # with a separate CUDA context.
 quantization_precision: [8]       # bit-width(s) for quantizing models in top_models.py
                                     # scalar (e.g. 8) or list (e.g. [8, 16]) accepted
+quantization_methods: [standard]  # optional; PTQ methods to compare in top_models.py.
+                                    # "standard" = default esp-ppq PTQ (32 calib samples);
+                                    # "strat-kl-tqt" = best-performing 8-bit config
+                                    # (KL calibration over 256 stratified samples + TQT
+                                    # block_size=512, steps=3000, lr=2e-4; see
+                                    # TQT_FINAL_REPORT.md). Each method is stored under
+                                    # its own suffixed results keys (e.g. *_strat).
 plot_description: "Mamba-1 baseline"  # optional; label used in Pareto front plots
 
 SEARCH_SPACE:
@@ -190,6 +197,8 @@ The `results.json` file is a JSON array of objects, each with:
 | `mcu_latency_ms` | Average inference latency on ESP32-S3 (ms) |
 | `mcu_profiling` | Dict of operator-level profiling breakdown (count and total latency in ms per op type) |
 
+When `quantization_methods` includes `strat-kl-tqt`, its metrics are stored under `_strat`-suffixed keys (e.g. `quantized_accuracy_strat`, `test_quantized_accuracy_strat`, `param_size_bytes_strat`), mirroring the `_int16` pattern, so methods can be compared for the same trials.
+
 ## Visualisation
 
 Pareto front comparison and accuracy plots are generated with `train/plot_arch_search.py`.
@@ -198,7 +207,7 @@ Pareto front comparison and accuracy plots are generated with `train/plot_arch_s
 conda activate torch-pascal
 python -m train.plot_arch_search --plot pareto config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml
 python -m train.plot_arch_search --plot accuracy config/har/arch-mamba1-har.yaml
-python -m train.plot_arch_search --plot accuracy config/har/arch-mamba1-har.yaml --mcu   # includes MCU accuracy bars
+python -m train.plot_arch_search --plot accuracy_grid config/kws/arch-mamba1-kws-2.yaml config/kws/arch-mamba1-kws-bidir.yaml config/kws/arch-mamba1-kws-bidir-mul.yaml config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml config/har/arch-mamba1-har-bidir-mul.yaml
 python -m train.plot_arch_search --plot mcu_pareto config/har/arch-mamba1-har.yaml
 ```
 
@@ -207,8 +216,10 @@ Four plot types are available:
 | `--plot` value | Description |
 |----------------|-------------|
 | `pareto` | Compares Pareto fronts of multiple experiments on PC latency vs accuracy |
-| `accuracy` | Bar chart comparing float vs quantized accuracy per trial (optionally with `--mcu` for MCU accuracy bars) |
+| `accuracy` | Scatter plot of quantized accuracy (y) vs float accuracy (x), with distinct points per quantization method (int8, and int16 / strat-kl-tqt when present) and a y=x dotted reference line |
+| `accuracy_grid` | Combined scatter plot: one panel per study in a shared grid with common axis limits/labels, a single shared legend and a y=x reference line in every panel |
 | `mcu_pareto` | Two-panel figure: (left) PC Pareto front with ★ markers for MCU-tested trials; (right) MCU accuracy vs MCU latency for those models, annotated with trial numbers |
+| `stacked` | Stacked bar chart of MCU operator latency across ALL MCU-tested trials (one bar per trial, segment per operator, sorted by total latency). Normalised to 100% by default; use `--absolute` for summed ms. Total latency annotated above each bar |
 | `quantization_loss` | Two-panel figure comparing quantization loss across multiple studies: (left) bar chart of mean loss per study with individual trial points overlaid; (right) scatter plot of float vs quantized accuracy with trend lines and diagonal |
 
 All figures are saved to `figures/` as `.png` and `.pdf`.

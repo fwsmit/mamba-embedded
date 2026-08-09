@@ -26,7 +26,9 @@ from torch.utils.data import DataLoader
 from .quantize import (
     get_espdl_param_size,
     quantize_onnx_to_espdl,
+    quantize_onnx_to_espdl_best,
     load_calibration,
+    load_calibration_stratified,
     load_datasets,
     run_espdl_test,
     run_onnx_test,
@@ -37,9 +39,37 @@ from .quantize import (
     CALIB_STEPS,
     CALIB_BATCH,
     TARGET,
+    BEST_CALIB_STEPS,
     run_espdl_test,
     run_onnx_test,
 )
+
+
+# ---------------------------------------------------------------------------
+# Quantization methods
+# ---------------------------------------------------------------------------
+
+# Supported quantization "methods" select both the esp-ppq quantize routine
+# and its calibration loader. The ``strat-kl-tqt`` method is the best
+# performing fully-8-bit config found (TQT_FINAL_REPORT.md): KL calibration
+# over a stratified calibration set followed by a graph-wide
+# TrainedQuantizationThreshold pass. Each method's metrics are stored under
+# a suffixed results key and the .espdl artefact gets the matching filename
+# suffix, so methods can be compared for the same set of selected models.
+QUANTIZATION_METHODS = {
+    "standard": {
+        "quantize": quantize_onnx_to_espdl,
+        "calib_steps": CALIB_STEPS,
+        "key_suffix": "",
+    },
+    "strat-kl-tqt": {
+        "quantize": quantize_onnx_to_espdl_best,
+        "calib_steps": BEST_CALIB_STEPS,
+        "key_suffix": "_strat",
+    },
+}
+
+DEFAULT_QUANTIZATION_METHOD = "standard"
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +492,49 @@ def build_data(
     return calib_loader, val_ds, val_labels, test_ds, test_labels
 
 
+def build_calib_loader_for_method(
+    dataset: str,
+    repo_root: Path,
+    method: str,
+    n_calib_samples: int,
+    train_ds=None,
+):
+    """Build the calibration dataloader appropriate for *method*.
+
+    ``strat-kl-tqt`` needs a class-balanced stratified selection, whereas the
+    standard method uses uniform-random subsampling.  *train_ds*, when given,
+    is reused so the training set is loaded only once.
+    """
+    if method == "strat-kl-tqt":
+        return load_calibration_stratified(dataset, repo_root, train_ds=train_ds)
+    return load_calibration(dataset, repo_root, n_calib_samples, train_ds=train_ds)
+
+
+def combined_key_suffix(num_of_bits: int, method: str) -> str:
+    """Filename / results key suffix for a precision × method combination.
+
+    Backward compatible: the standard method at 8 bits uses no suffix.
+    """
+    method_suffix = QUANTIZATION_METHODS[method]["key_suffix"]
+    precision_suffix = f"_int{num_of_bits}" if num_of_bits != 8 else ""
+    return method_suffix + precision_suffix
+
+
+def resolve_methods(cfg) -> list[str]:
+    """Read the requested quantization methods from a config, defaulting to
+    the standard method for backward compatibility."""
+    raw = cfg.get("quantization_methods", DEFAULT_QUANTIZATION_METHOD)
+    if isinstance(raw, str):
+        raw = [raw]
+    for m in raw:
+        if m not in QUANTIZATION_METHODS:
+            raise ValueError(
+                f"Unknown quantization method '{m}'. "
+                f"Available: {list(QUANTIZATION_METHODS)}"
+            )
+    return list(raw)
+
+
 def load_existing_results(
     experiments_dir: Path,
 ) -> tuple[list[dict], set[int]]:
@@ -490,6 +563,8 @@ def quantize_trial(
     results: list[dict],
     num_of_bits: int = 8,
     key_suffix: str = "",
+    quantize_func=quantize_onnx_to_espdl,
+    calib_steps: int = CALIB_STEPS,
 ):  # -> None:
     """Quantize one trial's ONNX model and add its metrics to *results*.
 
@@ -523,11 +598,11 @@ def quantize_trial(
     print(f"    Input shape : {input_shape}")
     print(f"    Output      : {espdl_path}")
 
-    quant_graph = quantize_onnx_to_espdl(
+    quant_graph = quantize_func(
         onnx_path=onnx_path,
         espdl_path=espdl_path,
         calib_loader=calib_loader,
-        calib_steps=CALIB_STEPS,
+        calib_steps=calib_steps,
         input_shape=input_shape,
         target=TARGET,
         num_of_bits=num_of_bits,
@@ -714,18 +789,6 @@ def parse_mcu_output(
 # ---------------------------------------------------------------------------
 
 
-def _quantized_key_for_precision(num_of_bits: int) -> str:
-    """Return the results.json key expected for ``quantized_accuracy`` at
-    the given bit-width (backward compat: 8-bit uses no suffix)."""
-    return f"quantized_accuracy{'_int' + str(num_of_bits) if num_of_bits != 8 else ''}"
-
-
-def _test_quantized_key_for_precision(num_of_bits: int) -> str:
-    """Return the results.json key expected for ``test_quantized_accuracy`` at
-    the given bit-width (backward compat: 8-bit uses no suffix)."""
-    return f"test_quantized_accuracy{'_int' + str(num_of_bits) if num_of_bits != 8 else ''}"
-
-
 def process_study(
     study_name: str,
     args: argparse.Namespace,
@@ -734,6 +797,7 @@ def process_study(
     n_calib_samples: int,
     run_script: Path,
     num_of_bits_list: list[int],
+    cfg: dict,
 ) -> None:
     """Run the full pipeline (select, quantize, deploy) for one study.
 
@@ -757,57 +821,73 @@ def process_study(
     calib_loader, val_ds, val_labels, test_ds, test_labels = build_data(
         dataset, repo_root, n_calib_samples)
 
-    # Load previously quantized results to avoid rework
+    # Quantization methods to run (e.g. standard + strat-kl-tqt for comparison)
+    methods = resolve_methods(cfg)
+    # Load the (potentially multi-GB) training set once and derive every
+    # method's calibration subset from it, then release it.  The loaders hold
+    # only the tiny compact subsets, so the full training set is freed.
+    train_ds = load_datasets(dataset, split="train")
+    calib_loaders = {
+        m: build_calib_loader_for_method(dataset, repo_root, m, n_calib_samples, train_ds)
+        for m in methods
+    }
+    del train_ds
 
-    # Quantize each selected model at each requested precision
+    # Quantize each selected model at each requested precision × method
     for num_of_bits in num_of_bits_list:
-        key_suffix = f"_int{num_of_bits}" if num_of_bits != 8 else ""
-        suffix_desc = f"{num_of_bits}-bit"
-        quant_key = _quantized_key_for_precision(num_of_bits)
-        test_quant_key = _test_quantized_key_for_precision(num_of_bits)
+        for method in methods:
+            key_suffix = combined_key_suffix(num_of_bits, method)
+            suffix_desc = f"{num_of_bits}-bit/{method}"
+            quant_key = f"quantized_accuracy{key_suffix}"
+            test_quant_key = f"test_quantized_accuracy{key_suffix}"
+            quant_func = QUANTIZATION_METHODS[method]["quantize"]
+            calib_steps = QUANTIZATION_METHODS[method]["calib_steps"]
 
-        print()
-        print("=" * 62)
-        print(f"  QUANTIZING SELECTED MODELS — {suffix_desc} — {study_name}")
-        print("=" * 62)
-        print()
-
-        results, _ = load_existing_results(experiments_dir)
-        # Determine which trials already have results for this precision
-        done_valid_for_precision = set()
-        done_test_for_precision = set()
-        for entry in results:
-            tn = entry.get("trial_number")
-            if tn is not None and quant_key in entry:
-                done_valid_for_precision.add(tn)
-            if tn is not None and test_quant_key in entry:
-                done_test_for_precision.add(tn)
-
-        for tn in selected_trials:
-            if tn in done_valid_for_precision and tn in done_test_for_precision:
-                print(f"  Trial #{tn}: {suffix_desc} already tested on validation and test set, skipping\n")
-                continue
+            print()
+            print("=" * 62)
+            print(f"  QUANTIZING SELECTED MODELS — {suffix_desc} — {study_name}")
+            print("=" * 62)
+            print()
 
             results, _ = load_existing_results(experiments_dir)
-            quant_graph = quantize_trial(tn, study_name, onnx_dir, experiments_dir,
-                           calib_loader, val_ds, test_ds, device, results,
-                           num_of_bits=num_of_bits, key_suffix=key_suffix)
+            # Determine which trials already have results for this precision/method
+            done_valid_for_precision = set()
+            done_test_for_precision = set()
+            for entry in results:
+                tn = entry.get("trial_number")
+                if tn is not None and quant_key in entry:
+                    done_valid_for_precision.add(tn)
+                if tn is not None and test_quant_key in entry:
+                    done_test_for_precision.add(tn)
 
-            if not quant_graph:
-                print("WARNING: quantization did not work, probably missing ONNX file")
-                continue
+            for tn in selected_trials:
+                if tn in done_valid_for_precision and tn in done_test_for_precision:
+                    print(f"  Trial #{tn}: {suffix_desc} already tested on validation and test set, skipping\n")
+                    continue
 
-            assert (quant_graph)
+                results, _ = load_existing_results(experiments_dir)
+                quant_graph = quantize_trial(
+                    tn, study_name, onnx_dir, experiments_dir,
+                    calib_loaders[method], val_ds, test_ds, device, results,
+                    num_of_bits=num_of_bits, key_suffix=key_suffix,
+                    quantize_func=quant_func, calib_steps=calib_steps,
+                )
 
-            if tn not in done_valid_for_precision:
-                print(f"    Evaluating on validation set ...")
-                accuracy = run_espdl_test(quant_graph, val_ds, 'cuda')
-                update_result(experiments_dir, tn, quant_key, accuracy)
+                if not quant_graph:
+                    print("WARNING: quantization did not work, probably missing ONNX file")
+                    continue
 
-            if tn not in done_test_for_precision:
-                print(f"    Evaluating on test set ...")
-                accuracy = run_espdl_test(quant_graph, test_ds, 'cuda')
-                update_result(experiments_dir, tn, test_quant_key, accuracy)
+                assert (quant_graph)
+
+                if tn not in done_valid_for_precision:
+                    print(f"    Evaluating on validation set ...")
+                    accuracy = run_espdl_test(quant_graph, val_ds, 'cuda')
+                    update_result(experiments_dir, tn, quant_key, accuracy)
+
+                if tn not in done_test_for_precision:
+                    print(f"    Evaluating on test set ...")
+                    accuracy = run_espdl_test(quant_graph, test_ds, 'cuda')
+                    update_result(experiments_dir, tn, test_quant_key, accuracy)
 
     print("All selected models quantized and evaluated.")
 
@@ -889,7 +969,7 @@ def main() -> None:
         print()
 
         process_study(study_name, args, repo_root, device, n_calib_samples, run_script,
-                       num_of_bits_list=num_of_bits_list)
+                       num_of_bits_list=num_of_bits_list, cfg=cfg)
 
 
 if __name__ == "__main__":
