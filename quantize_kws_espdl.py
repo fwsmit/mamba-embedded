@@ -161,6 +161,44 @@ WEIGHTED_OP_TYPES = {"Conv", "MatMul", "Gemm", "ConvTranspose"}
 
 
 # --------------------------------------------------------------------------
+# Step 0b: calibration-sample selection
+# --------------------------------------------------------------------------
+def stratify_calib_indices(y, n, seed=0):
+    """Model-agnostic, spread-maximising calibration select.
+
+    Returns n indices chosen deterministically so the calibration set is
+    balanced across every distinct label and spreads samples evenly within
+    each class (strided pick), instead of a uniform-random subset.
+    Uniform random subsetting of a handful of samples is noisy -- accuracy
+    swings several points depending on which lucky/unlucky samples land in
+    the set (observed for this model: 85.7% vs 88.6% between adjacent calib
+    sizes). Stratifying removes that variance and carries over to any
+    labelled dataset: it only needs the label vector.
+    """
+    from collections import defaultdict
+    y = np.asarray(y)
+    groups = defaultdict(list)
+    for i, lbl in enumerate(y.tolist()):
+        groups[lbl].append(i)
+    classes = sorted(groups.keys())
+    base, rem = divmod(n, len(classes))
+    rng = np.random.default_rng(seed)
+    bonus = set(rng.permutation(classes)[:rem].tolist())
+    chosen = []
+    for cls in classes:
+        arr = groups[cls]
+        quota = base + (1 if cls in bonus else 0)
+        if quota <= 0:
+            continue
+        if len(arr) <= quota:
+            chosen.extend(arr)
+        else:
+            step = len(arr) / quota
+            chosen.extend(arr[int(step * i)] for i in range(quota))
+    return np.array(chosen, dtype=np.int64)
+
+
+# --------------------------------------------------------------------------
 # Step 0: dataset
 # --------------------------------------------------------------------------
 class KWSPickleDataset(Dataset):
@@ -376,6 +414,11 @@ def main():
     ap.add_argument("--output", type=Path, default=None, help="output .espdl path")
     ap.add_argument("--calib-samples", type=int, default=256)
     ap.add_argument("--calib-steps", type=int, default=256)
+    ap.add_argument("--stratify", action="store_true", default=False,
+                    help="select calibration samples class-balanced + spread evenly "
+                         "per class instead of uniform-random. Removes subsetting "
+                         "variance; generalises to any labelled dataset (see "
+                         "report). Recommended.")
     ap.add_argument("--eval-samples", type=int, default=0, help="0 = full test set")
     ap.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--seed", type=int, default=42)
@@ -415,7 +458,11 @@ def main():
     print(f"test (evaluation, held out) = {len(test_ds)} samples")
 
     rng = np.random.default_rng(args.seed)
-    calib_idx = rng.choice(len(val_ds), size=min(args.calib_samples, len(val_ds)), replace=False)
+    n_calib = min(args.calib_samples, len(val_ds))
+    if args.stratify:
+        calib_idx = stratify_calib_indices(val_ds.y.numpy(), n_calib, seed=args.seed)
+    else:
+        calib_idx = rng.choice(len(val_ds), size=n_calib, replace=False)
     calib_loader = DataLoader(Subset(val_ds, calib_idx.tolist()), batch_size=1, shuffle=False)
 
     # ---- Step 3: float baseline ----
