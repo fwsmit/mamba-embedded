@@ -1,8 +1,10 @@
 from esp_ppq.api import export_ppq_graph
+import esp_ppq.lib as PFL
 from esp_ppq.IR import BaseGraph, Operation
 # from esp_ppq.passes import QuantizationOptimizationPass
 from esp_ppq.api.setting import QuantizationSettingFactory
 from esp_ppq.core import TargetPlatform
+from esp_ppq.api.espdl_interface import generate_test_value, get_random_inputs, get_target_platform
 import argparse
 import re
 import struct
@@ -47,6 +49,11 @@ TQT_LR = 2e-4
 BEST_CALIB_ALGORITHM = "kl"
 BEST_CALIB_SAMPLES = 256
 BEST_CALIB_STEPS = 256
+
+
+class QuantizationDivergedError(RuntimeError):
+    """Raised when a training-based quantization pass (e.g. TQT) diverges and
+    leaves NaN/Inf scales in the graph, so the model cannot be deployed."""
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -617,6 +624,26 @@ def quantize_onnx_to_espdl(
 # ---------------------------------------------------------------------------
 
 
+def _graph_has_invalid_scales(graph: BaseGraph) -> bool:
+    """Return True if any quant config holds a NaN or Inf scale.
+
+    Training-based passes (TQT / LSQ / ...) can diverge and write NaN/Inf
+    scales into the graph; the esp-ppq exporter then crashes with
+    ``ValueError: cannot convert float NaN to integer`` in
+    ``QuantVariableToIntPattern.calculate_exponent``.
+    """
+    for op in graph.operations.values():
+        if not isinstance(op, QuantableOperation):
+            continue
+        for cfg, _ in op.config_with_variable:
+            if not isinstance(cfg.scale, torch.Tensor):
+                continue
+            scale = cfg.scale.detach().cpu().numpy()
+            if np.isnan(scale).any() or np.isinf(scale).any():
+                return True
+    return False
+
+
 def quantize_onnx_to_espdl_best(
     onnx_path: str | Path,
     espdl_path: str | Path,
@@ -686,11 +713,30 @@ def quantize_onnx_to_espdl_best(
         device=device,
         export_test_values=True,
         error_report=True,
-        skip_export=False,
+        skip_export=True,
         verbose=0,
         dispatching_override=None,
     )
 
+    if _graph_has_invalid_scales(quant_graph):
+        raise QuantizationDivergedError(
+            f"TQT diverged (NaN/Inf scales) for {onnx_path.name}; model cannot be deployed."
+        )
+
+    # TQT succeeded: serialise the quantized graph to .espdl (mirrors the
+    # export step espdl_quantize_onnx performs after training).
+    dummy_inputs = get_random_inputs(input_shape, torch.float32, device)
+    values_for_test = generate_test_value(quant_graph, device, dummy_inputs)
+    target_platform = get_target_platform(target, num_of_bits)
+    PFL.Exporter(platform=target_platform).export(
+        file_path=str(espdl_path),
+        graph=quant_graph,
+        values_for_test=values_for_test,
+        export_config=True,
+        auto_streaming=False,
+        streaming_table=None,
+        streaming_input_shape=None,
+    )
     return quant_graph
 
 

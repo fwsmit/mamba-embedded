@@ -27,6 +27,7 @@ from .quantize import (
     get_espdl_param_size,
     quantize_onnx_to_espdl,
     quantize_onnx_to_espdl_best,
+    QuantizationDivergedError,
     load_calibration,
     load_calibration_stratified,
     load_datasets,
@@ -598,17 +599,21 @@ def quantize_trial(
     print(f"    Input shape : {input_shape}")
     print(f"    Output      : {espdl_path}")
 
-    quant_graph = quantize_func(
-        onnx_path=onnx_path,
-        espdl_path=espdl_path,
-        calib_loader=calib_loader,
-        calib_steps=calib_steps,
-        input_shape=input_shape,
-        target=TARGET,
-        num_of_bits=num_of_bits,
-        device=device,
-        collate_fn=collate_fn,
-    )
+    try:
+        quant_graph = quantize_func(
+            onnx_path=onnx_path,
+            espdl_path=espdl_path,
+            calib_loader=calib_loader,
+            calib_steps=calib_steps,
+            input_shape=input_shape,
+            target=TARGET,
+            num_of_bits=num_of_bits,
+            device=device,
+            collate_fn=collate_fn,
+        )
+    except QuantizationDivergedError as e:
+        print(f"  WARNING: {e} Skipping trial #{trial_number} for this method.")
+        return None
 
     print(f"    Exporting quantized validation dataset ...")
     configs = get_input_quantization(quant_graph)

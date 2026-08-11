@@ -7,6 +7,7 @@ Usage:
   python plot_arch_search.py config/a.yaml config/b.yaml config/c.yaml config/d.yaml
   python plot_arch_search.py --plot pareto config/arch-mamba1-kws.yaml config/arch-mamba1-kws-multi.yaml
   python plot_arch_search.py --plot accuracy config/arch-mamba1-kws.yaml
+  python plot_arch_search.py --plot accuracy --bar config/arch-mamba1-kws.yaml
   python plot_arch_search.py --plot pareto --use-mcu config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot latency config/arch-mamba1-har.yaml
 """
@@ -31,7 +32,7 @@ from .plot_types.profiling import create_profiling_plot
 from .plot_types.stacked_profiling import create_stacked_profiling_plot
 from .plot_types.common import create_out_dirs
 from .plot_types.generic_scatter import create_generic_scatter_plot
-from .plot_types.accuracy import create_accuracy_comparison_plot
+from .plot_types.accuracy import create_accuracy_comparison_bar_plot, create_accuracy_comparison_plot
 from .plot_types.accuracy_grid import create_accuracy_grid_plot
 from .plot_types.quantization_loss import create_quantization_loss_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
@@ -147,6 +148,11 @@ def main():
              "'quantization_loss' (quantization loss comparison across studies)."
     )
     parser.add_argument(
+        "--bar", action="store_true",
+        help="For --plot accuracy: draw a grouped bar chart (one bar group per "
+             "trial) instead of the float-vs-quantized scatter plot."
+    )
+    parser.add_argument(
         "--title", type=str, default=None,
         help="Title of the plot and base name for saved files. "
              "If not provided, derived from the study names."
@@ -188,6 +194,9 @@ def main():
         help="Y-axis label for the scatter plot (optional)."
     )
     args = parser.parse_args()
+
+    if args.bar and args.plot != "accuracy":
+        parser.error("--bar is only valid with --plot accuracy")
 
     n = len(args.configs)
     if n == 0:
@@ -246,7 +255,10 @@ def main():
         load_results_data(studies_data, repo_root)
         for sd in studies_data:
             if sd.get("results_data"):
-                create_accuracy_comparison_plot(sd["name"], sd["results_data"], title)
+                if args.bar:
+                    create_accuracy_comparison_bar_plot(sd["name"], sd["results_data"], title)
+                else:
+                    create_accuracy_comparison_plot(sd["name"], sd["results_data"], title)
                 plot_created = True
             else:
                 print(f"  No results.json found for {sd['name']}, skipping.")
