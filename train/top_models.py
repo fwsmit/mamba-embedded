@@ -552,6 +552,25 @@ def load_existing_results(
     return results, done_trials
 
 
+def count_float_params(onnx_path: str) -> int:
+    """Count the number of trainable parameters in an ONNX model.
+
+    Sums elements across all float-dtype initializer tensors (weights + biases),
+    excluding integer (int64/int32) initializers used purely as shape/index/axis
+    constants (e.g. for Reshape, Slice, Split, Gather ops).
+    """
+    import onnx
+    from onnx import numpy_helper
+
+    model = onnx.load(onnx_path)
+    total = 0
+    for init in model.graph.initializer:
+        arr = numpy_helper.to_array(init)
+        if arr.dtype.kind == "f":  # float16 / float32 / float64
+            total += arr.size
+    return total
+
+
 def quantize_trial(
     trial_number: int,
     study_name: str,
@@ -936,6 +955,21 @@ def process_study(
             print(f"    Evaluating on test set ...")
             accuracy = run_onnx_test(str(onnx_path), test_ds)
             update_result(experiments_dir, tn, "test_float_accuracy", accuracy)
+
+    print("Calculation ONNX model parameter count")
+    # Count true parameters from each trial's float ONNX model (not tied to
+    # quantization). Skipped when already stored in results.json.
+    results, _ = load_existing_results(experiments_dir)
+    done_nr_params = {r["trial_number"]
+                      for r in results if "nr_parameters" in r}
+    for tn in selected_trials:
+        if tn in done_nr_params:
+            print(f"    Trial #{tn}: nr_parameters already stored, skipping\n")
+            continue
+        onnx_path = experiments_dir / f"{study_name}-trial-{tn}.onnx"
+        print(f"    Count nr_parameters for Trial #{tn} ...")
+        nr_parameters = count_float_params(str(onnx_path))
+        update_result(experiments_dir, tn, "nr_parameters", nr_parameters)
 
 
     # Deploy each quantized model to ESP32-S3 (only 8-bit for now)
