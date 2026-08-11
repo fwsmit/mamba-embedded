@@ -566,6 +566,8 @@ def quantize_trial(
     key_suffix: str = "",
     quantize_func=quantize_onnx_to_espdl,
     calib_steps: int = CALIB_STEPS,
+    quant_key: str = "quantized_accuracy",
+    test_quant_key: str = "test_quantized_accuracy",
 ):  # -> None:
     """Quantize one trial's ONNX model and add its metrics to *results*.
 
@@ -613,6 +615,16 @@ def quantize_trial(
         )
     except QuantizationDivergedError as e:
         print(f"  WARNING: {e} Skipping trial #{trial_number} for this method.")
+        entry: dict = {"trial_number": trial_number, quant_key: 0, test_quant_key: 0}
+        existing = next((e for e in results if e.get("trial_number") == trial_number), None)
+        if existing is not None:
+            existing.update(entry)
+        else:
+            results.append(entry)
+        results_path = experiments_dir / "results.json"
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"    Stored 0 accuracy for diverged trial #{trial_number}")
         return None
 
     print(f"    Exporting quantized validation dataset ...")
@@ -876,6 +888,7 @@ def process_study(
                     calib_loaders[method], val_ds, test_ds, device, results,
                     num_of_bits=num_of_bits, key_suffix=key_suffix,
                     quantize_func=quant_func, calib_steps=calib_steps,
+                    quant_key=quant_key, test_quant_key=test_quant_key,
                 )
 
                 if not quant_graph:
