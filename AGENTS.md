@@ -86,7 +86,10 @@ quantization_methods: [standard]  # optional; PTQ methods to compare in top_mode
                                     # (KL calibration over 256 stratified samples + TQT
                                     # block_size=512, steps=3000, lr=2e-4; see
                                     # TQT_FINAL_REPORT.md). Each method is stored under
-                                    # its own suffixed results keys (e.g. *_strat).
+                                    # its own suffixed results keys (e.g. *_strat). If TQT
+                                    # diverges (NaN/Inf scales, e.g. on some bidirectional
+                                    # models), it automatically falls back to
+                                    # calibration-only PTQ so the pipeline still completes.
 plot_description: "Mamba-1 baseline"  # optional; label used in Pareto front plots
 
 SEARCH_SPACE:
@@ -188,6 +191,7 @@ The `results.json` file is a JSON array of objects, each with:
 | `float_accuracy` | Accuracy of the original float PyTorch model on validation set (%) |
 | `quantized_accuracy` | Accuracy after int8 quantization (on PC) on validation set (%) |
 | `quantized_accuracy_int16` | Accuracy after int16 quantization (on PC) on validation set (%) — only present when 16-bit is requested |
+| `nr_parameters` | Number of trainable parameters counted from the float ONNX model (sum of elements across all float-dtype initializers, excluding integer shape/index constants) |
 | `param_size_bytes` | Parameter size after int8 quantization (bytes) |
 | `param_size_bytes_int16` | Parameter size after int16 quantization (bytes) — only present when 16-bit is requested |
 | `test_float_accuracy` | Accuracy of the float model on the test set (%) |
@@ -221,6 +225,8 @@ Four plot types are available:
 | `mcu_pareto` | Two-panel figure: (left) PC Pareto front with ★ markers for MCU-tested trials; (right) MCU accuracy vs MCU latency for those models, annotated with trial numbers |
 | `stacked` | Stacked bar chart of MCU operator latency across ALL MCU-tested trials (one bar per trial, segment per operator, sorted by total latency). Normalised to 100% by default; use `--absolute` for summed ms. Total latency annotated above each bar |
 | `quantization_loss` | Two-panel figure comparing quantization loss across multiple studies: (left) bar chart of mean loss per study with individual trial points overlaid; (right) scatter plot of float vs quantized accuracy with trend lines and diagonal |
+
+Pass `--bar` together with `--plot accuracy` to draw a grouped bar chart (one bar group per trial, one bar per quantization method) instead of the scatter plot. Without `--bar`, the accuracy plot is unchanged.
 
 All figures are saved to `figures/` as `.png` and `.pdf`.
 
