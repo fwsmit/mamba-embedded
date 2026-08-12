@@ -872,6 +872,9 @@ def process_study(
     # Quantize each selected model at each requested precision × method
     for num_of_bits in num_of_bits_list:
         for method in methods:
+            if num_of_bits == 16 and method == "strat-kl-tqt":
+                print("Skipping 16-bit TQT quantization")
+                continue
             key_suffix = combined_key_suffix(num_of_bits, method)
             suffix_desc = f"{num_of_bits}-bit/{method}"
             quant_key = f"quantized_accuracy{key_suffix}"
