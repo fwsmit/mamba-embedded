@@ -12,6 +12,7 @@ bidirectional: true
 bidirectional_strategy: add
 n_trials: 149
 quantization_precision: [8, 16]
+quantization_methods: [standard, strat-kl-tqt]
 plot_description: "bidirectional (add)"
 
 SEARCH_SPACE:
