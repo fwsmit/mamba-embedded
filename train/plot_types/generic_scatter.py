@@ -97,10 +97,26 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
     ax.set_title(title, fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
 
-    # Format x-axis with K/M suffix for byte-sized values
-    ax.xaxis.set_major_formatter(ticker.FuncFormatter(
-        lambda x, _: f"{x/1000:.0f}K" if abs(x) >= 1000 else f"{x:.0f}"
-    ))
+    # Scale x-axis labels by 1000 (e.g. bytes -> kB), keeping enough decimals
+    # that zooming in does not round neighbouring values together.
+    class _ScaledKFormatter(ticker.FuncFormatter):
+        def __init__(self, scale=1000.0, sig=3):
+            self.scale = scale
+            self.sig = sig
+            super().__init__(self._fmt)
+
+        def _fmt(self, x, pos=None):
+            ax = getattr(self, "axis", None)
+            decimals = 0
+            if ax is not None:
+                span = abs(ax.get_view_interval()[1] - ax.get_view_interval()[0])
+                if span > 0:
+                    # ~sig significant digits over the visible span, in scaled units
+                    decimals = int(np.clip(
+                        self.sig - 1 - np.floor(np.log10(span / self.scale)), 0, 8))
+            return f"{x / self.scale:.{decimals}f}"
+
+    ax.xaxis.set_major_formatter(_ScaledKFormatter())
 
     ax.legend(handles=legend_handles,
               labels=legend_labels,

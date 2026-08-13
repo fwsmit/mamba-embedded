@@ -113,14 +113,14 @@ def create_accuracy_comparison_bar_plot(study_name, data, title):
         print(f"  No valid accuracy entries found for {study_name}.")
         return
 
-    data = sorted(data, key=lambda d: d.get("trial_number", 0))
+    data = sorted(data, key=lambda d: d.get("test_float_accuracy", 0), reverse=True)
 
     methods = [("Float", "test_float_accuracy", "#4C9BE8")]
-    methods.append(("Quantized (int8)", "test_quantized_accuracy", "#E8834C"))
     if _has_quant16(data):
-        methods.append(("Quantized (int16)", "test_quantized_accuracy_int16", "#8E44AD"))
+        methods.append(("Quantized (int16-percent)", "test_quantized_accuracy_int16", "#8E44AD"))
+    methods.append(("Quantized (int8-percent)", "test_quantized_accuracy", "#E8834C"))
     if _has_quant_strat(data):
-        methods.append(("Quantized (strat-kl-tqt)", "test_quantized_accuracy_strat", "#2E7D32"))
+        methods.append(("Quantized (int8-kl-tqt)", "test_quantized_accuracy_strat", "#2E7D32"))
 
     n = len(data)
     x = np.arange(n)
@@ -142,10 +142,10 @@ def create_accuracy_comparison_bar_plot(study_name, data, title):
     ax.set_xticks(x)
     ax.set_xticklabels([str(d.get("trial_number", i)) for i, d in enumerate(data)],
                        fontsize=9)
-    ax.set_xlabel("Trial", fontsize=11)
+    ax.set_xlabel("Trial nr", fontsize=11)
     ax.set_ylabel("Accuracy (%)", fontsize=11)
     ax.set_title(title, fontsize=13, fontweight="bold")
-    ax.legend(fontsize=10)
+    ax.legend(fontsize=10, loc="lower left", framealpha=1.0)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
     savefig(fig, title, "accuracy")
