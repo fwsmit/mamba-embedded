@@ -13,6 +13,10 @@ ALPHA_PARETO = 0.95
 MARKER_ALL = "o"
 MARKER_PAR = "D"
 
+ACCURACY_LABEL = "Accuracy on validation set"
+LATENCY_MCU_LABEL = "Latency on MCU (ms, lower is better)"
+LATENCY_PC_LABEL = "Latency on PC (μs, lower is better)"
+
 
 class _TwoMarkerProxy:
     """Proxy artist carrying the two colours for a combined legend entry."""
@@ -187,8 +191,8 @@ def create_mcu_pareto_plot(studies_data, title):
         pad_lat = span * 0.2 if span > 0 else (lo * 0.2 if lo > 0 else 10.0)
         ax_pc.set_xlim(lo - pad_lat, hi + pad_lat)
 
-    ax_pc.set_xlabel("Latency on PC (μs, lower is better)", fontsize=11)
-    ax_pc.set_ylabel("Accuracy (higher is better)", fontsize=11)
+    ax_pc.set_xlabel(LATENCY_PC_LABEL, fontsize=11)
+    ax_pc.set_ylabel(ACCURACY_LABEL, fontsize=11)
     ax_pc.set_title("PC Pareto Front (\u2605 = MCU-tested)", fontsize=12, fontweight="bold")
     ax_pc.grid(True, alpha=0.3, linestyle="--")
     if legend_handles:
@@ -196,8 +200,8 @@ def create_mcu_pareto_plot(studies_data, title):
                      framealpha=0.9, fontsize=8)
 
     # ── Right panel decorations ──────────────────────────────────────────────
-    ax_mcu.set_xlabel("Latency on MCU (ms, lower is better)", fontsize=11)
-    ax_mcu.set_ylabel("Accuracy (higher is better)", fontsize=11)
+    ax_mcu.set_xlabel(LATENCY_MCU_LABEL, fontsize=11)
+    ax_mcu.set_ylabel(ACCURACY_LABEL, fontsize=11)
     ax_mcu.set_title("MCU Accuracy vs Latency", fontsize=12, fontweight="bold")
     ax_mcu.grid(True, alpha=0.3, linestyle="--")
 
@@ -319,9 +323,9 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False):
         ax.plot([first_x, first_x], [first_y, y_bottom],
                 color=sd["color_par"], linewidth=1.8, zorder=3)
 
-    xlabel = "Latency on MCU (ms, lower is better)" if use_mcu else "Latency on PC (μs, lower is better)"
+    xlabel = LATENCY_MCU_LABEL if use_mcu else LATENCY_PC_LABEL
     ax.set_xlabel(xlabel, fontsize=11)
-    ax.set_ylabel("Accuracy  (higher is better)", fontsize=11)
+    ax.set_ylabel(ACCURACY_LABEL, fontsize=11)
 
     n_studies = len(studies_data)
     ax.set_title(f"{title}",

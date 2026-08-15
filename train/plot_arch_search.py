@@ -173,6 +173,12 @@ def main():
              "in the Pareto front plot (only valid with --plot pareto)."
     )
     parser.add_argument(
+        "--ylim", nargs=2, type=float, default=None, metavar=("LOW", "HIGH"),
+        help="Fix the y-axis range (used with --plot quantization_loss). Pass "
+             "the same values to comparable plots (e.g. KWS and HAR) to keep "
+             "their y-axes consistent."
+    )
+    parser.add_argument(
         "--use-param-size", action="store_true",
         help="Correlate MCU latency with parameter size instead of PC latency "
              "(only valid with --plot latency)."
@@ -217,15 +223,19 @@ def main():
     print(f"Creating {args.plot} plot")
 
     # ── Gather study data ─────────────────────────────────────────────────────
+    # Sort by display name so the legend order and colour assignment are
+    # consistent regardless of the order/expansion of the config arguments
+    # (e.g. config/har/* vs config/kws/*).
+    meta_list = sorted(
+        (load_study_meta(cp) for cp in args.configs), key=lambda m: m["display_name"]
+    )
     studies_data = []
-    for i, config_path in enumerate(args.configs):
-        meta = load_study_meta(config_path)
+    for i, meta in enumerate(meta_list):
         name = meta["study_name"]
         display_name = meta["display_name"]
         color_base, color_par = COLORS[i % len(COLORS)]
-        # print(f"Study {i+1}: {name}  (from {config_path})  → colour {color_base}")
-        # if display_name != name:
-        #     print(f"  → Plot label: {display_name}")
+        # print(f"Study {i+1}: {name} → colour {color_base}")
+        # print(f"  → Plot label: {display_name}")
 
         # print("  Loading study …")
         study = load_study(name)
@@ -320,7 +330,7 @@ def main():
 
     elif args.plot == "quantization_loss":
         load_results_data(studies_data, repo_root)
-        create_quantization_loss_plot(studies_data, title)
+        create_quantization_loss_plot(studies_data, title, ylim=args.ylim)
         plot_created = True
 
     elif args.plot == "profiling":

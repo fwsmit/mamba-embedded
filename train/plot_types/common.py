@@ -25,12 +25,16 @@ def fig_pdf_path(name):
     return os.path.join(PDF_DIR, name)
 
 
-def savefig(fig, title, filename):
+def savefig(fig, title, filename, dpi=None, svg=False):
+    dpi = FIG_DPI if dpi is None else dpi
     fig.tight_layout()
     slug = slugify(title)
     fig_path_png = fig_path(f"{filename}_{slug}.png")
     fig_path_pdf = fig_pdf_path(f"{filename}_{slug}.pdf")
-    fig.savefig(fig_path_png, dpi=FIG_DPI)
+    fig.savefig(fig_path_png, dpi=dpi)
     fig.savefig(fig_path_pdf)
-    print("Saved figures")
+    if svg:
+        fig_path_svg = fig_path(f"{filename}_{slug}.svg")
+        fig.savefig(fig_path_svg)
+    print(f"Saved figures to {fig_path_png}")
     print()
