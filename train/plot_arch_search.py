@@ -37,6 +37,7 @@ from .plot_types.accuracy_grid import create_accuracy_grid_plot
 from .plot_types.quantization_loss import create_quantization_loss_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
 from .plot_types.latency_correlation import create_latency_correlation_plot
+from .plot_types.param_accuracy import create_param_accuracy_plot, resolve_accuracy
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -136,7 +137,7 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss", "param_accuracy"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'accuracy_grid' (combined accuracy subplot grid sharing axes), "
@@ -144,8 +145,10 @@ def main():
              "'latency' (PC latency vs MCU latency scatter plot), "
              "'scatter' (generic scatter plot of two results.json fields), "
              "'profiling' (MCU operator profiling bar chart for a specific trial), "
-             "'stacked' (MCU operator latency stacked by trial across all MCU-tested trials), or "
-             "'quantization_loss' (quantization loss comparison across studies)."
+             "'stacked' (MCU operator latency stacked by trial across all MCU-tested trials), "
+             "'quantization_loss' (quantization loss comparison across studies), or "
+             "'param_accuracy' (nr of parameters vs accuracy with N models selected from the Pareto front; "
+             "for HAR studies, literature reference points are overlaid)."
     )
     parser.add_argument(
         "--bar", action="store_true",
@@ -198,6 +201,27 @@ def main():
     parser.add_argument(
         "--y-label", type=str, default="",
         help="Y-axis label for the scatter plot (optional)."
+    )
+    parser.add_argument(
+        "--n-models", type=int, default=10,
+        help="Number of models to select from the Pareto front for --plot "
+             "param_accuracy (default: 10)."
+    )
+    parser.add_argument(
+        "--min-val-acc", type=float, default=None,
+        help="For --plot param_accuracy: only consider models whose "
+             "validation-set accuracy is strictly above this value (percent) "
+             "for selection (default: no threshold)."
+    )
+    parser.add_argument(
+        "--size", type=int, choices=[32, 16, 8], default=8,
+        help="Bit width for --plot param_accuracy: 32 (float, unquantized), 16 "
+             "(int16) or 8 (int8). Default: 8."
+    )
+    parser.add_argument(
+        "--quantization", type=str, choices=["no", "percent", "tqt"], default="percent",
+        help="Quantization method for --plot param_accuracy: 'no' (float), "
+             "'percent' (standard PTQ) or 'tqt' (KL-TQT). Default: percent."
     )
     args = parser.parse_args()
 
@@ -331,6 +355,21 @@ def main():
     elif args.plot == "quantization_loss":
         load_results_data(studies_data, repo_root)
         create_quantization_loss_plot(studies_data, title, ylim=args.ylim)
+        plot_created = True
+
+    elif args.plot == "param_accuracy":
+        try:
+            accuracy_field, selection_field, accuracy_label = resolve_accuracy(
+                args.size, args.quantization)
+        except ValueError as e:
+            parser.error(str(e))
+        load_results_data(studies_data, repo_root)
+        create_param_accuracy_plot(studies_data, title,
+                                   n_models=args.n_models,
+                                   accuracy_field=accuracy_field,
+                                   selection_accuracy_field=selection_field,
+                                   accuracy_label=accuracy_label,
+                                   min_val_acc=args.min_val_acc)
         plot_created = True
 
     elif args.plot == "profiling":

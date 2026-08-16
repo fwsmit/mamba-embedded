@@ -57,3 +57,7 @@ python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mam
 python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mamba bidirectional (mul) (HAR)" config/har/arch-mamba1-har-bidir-mul.yaml
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (HAR)" config/har/*
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" config/kws/*
+
+# Compare parameter count with other studies
+python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/har/*
+python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
