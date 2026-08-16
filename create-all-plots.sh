@@ -25,8 +25,8 @@ python -m train.plot_arch_search --view --plot scatter --x-field nr_parameters -
 python -m train.plot_arch_search --view --plot scatter --x-field nr_parameters --y-field test_quantized_accuracy --x-label "Parameters (K)" --y-label "8-bit quantized accuracy (%)" --title "Parameters vs accuracy (HAR)" config/har/* --show
 
 # Quantization loss
-python -m train.plot_arch_search --plot quantization_loss config/kws/*
-python -m train.plot_arch_search --plot quantization_loss config/har/*
+python -m train.plot_arch_search --plot quantization_loss --title "Quantization loss per strategy (KWS)" config/kws/*
+python -m train.plot_arch_search --plot quantization_loss --title "Quantization loss per strategy (HAR)" config/har/*
 
 # Profiling plot
 python -m train.plot_arch_search --plot profiling --trial 18 config/har/arch-mamba1-har-bidir-mul.yaml

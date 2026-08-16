@@ -3,6 +3,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter
 
 from .common import savefig
 
@@ -74,8 +75,9 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     into a single column per strategy, so the figure shows exactly one boxplot
     + light raw-point strip + mean diamond per strategy. A dashed line at zero
     is the "no change" reference (points below = quantized model more accurate).
-    A symlog y-axis (linear near 0) keeps both the dense near-zero bulk and the
-    large outliers readable.
+    The y-axis is symlog (logarithmic, linear within ±LINTHRESH %pt) so the
+    dense near-zero bulk stays readable next to large outliers; ticks are
+    plain round numbers rather than log-decade labels.
 
     Parameters
     ----------
@@ -156,7 +158,13 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     ax.set_xticks([xs[si] for si in present])
     ax.set_xticklabels(tick_labels, fontsize=8)
     ax.set_ylabel("Quantization Loss (%pt)", fontsize=9)
-    ax.set_yticks([0, 1, 10, 100])
+    # Symlog would default to log-decade labels (10^0, 10^1 …); show plain
+    # round numbers instead, limited to the visible range so no tick is clipped.
+    vmax = ylim[1] if ylim is not None else ax.get_ylim()[1]
+    ax.set_yticks([t for t in (0, 5, 10, 20, 40, 80, 160, 320) if t <= vmax])
+    # Override the symlog formatter, which would otherwise blank out ticks
+    # that are not exact powers of ten.
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
     ax.tick_params(axis="both", labelsize=8)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
