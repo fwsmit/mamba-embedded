@@ -113,7 +113,7 @@ def create_accuracy_comparison_bar_plot(study_name, data, title):
         print(f"  No valid accuracy entries found for {study_name}.")
         return
 
-    data = sorted(data, key=lambda d: d.get("test_float_accuracy", 0), reverse=True)
+    data = sorted(data, key=lambda d: d.get("trial_number", 0), reverse=False)
 
     methods = [("Float", "test_float_accuracy", "#4C9BE8")]
     if _has_quant16(data):

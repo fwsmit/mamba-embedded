@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
 Select the n best models across one or more Optuna HPO studies ranked by
-parameter-efficiency, i.e. validation accuracy / number of parameters.
+validation accuracy / a cost metric. The metric is chosen with --sort:
+"param" (default) ranks by validation accuracy / nr_parameters, "latency"
+ranks by validation accuracy / mcu_latency_ms (only trials with MCU latency
+data are considered).
 
 For each config the study name is derived (as in top_models.py / plot_arch_search.py)
 and its experiments/<study>/results.json is read. All trials from all studies are
-merged, ranked by validation_accuracy / nr_parameters (descending), and the top n
-are printed in a table.
+merged, ranked by the chosen metric (descending), and the top n are printed in a table.
 
 Usage:
     python -m train.best_models config/kws/arch-mamba1-kws-2.yaml \
         config/har/arch-mamba1-har.yaml --n 10 --bits 8 --strat ptq
     python -m train.best_models config/kws/arch-mamba1-kws-2.yaml \
-        --n 5 --bits 16 --strat ptq
+        --n 5 --bits 16 --strat ptq --sort latency
 """
 
 import argparse
@@ -51,11 +53,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Print the n best models across studies ranked by "
-            "validation accuracy / nr_parameters."
+            "validation accuracy / cost metric (--sort)."
         )
     )
     parser.add_argument("configs", nargs="+",
                         help="Paths to Hydra config YAML files (one or more)")
+    parser.add_argument("--sort", type=str, default="param",
+                        choices=["param", "latency"],
+                        help="Ranking metric: 'param' = validation accuracy / "
+                             "nr_parameters (default), 'latency' = validation "
+                             "accuracy / mcu_latency_ms (only trials with MCU "
+                             "latency data are considered)")
     parser.add_argument("--n", type=int, default=10,
                         help="Number of top models to report (default: 10)")
     parser.add_argument("--bits", type=int, default=8, choices=[8, 16],
@@ -82,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = Path(args.repo_root) if args.repo_root \
         else Path(__file__).resolve().parent.parent
     val_key, test_key = derive_keys(args.bits, args.strat)
+    sort_key = "val_acc_per_ms" if args.sort == "latency" else "val_acc_per_param"
 
     rows = []  # dicts keyed by field name
     for config_path in args.configs:
@@ -100,13 +109,16 @@ def main(argv: list[str] | None = None) -> int:
             val_acc = entry.get(val_key)
             test_acc = entry.get(test_key)
             nr_params = entry.get(_PARAM_KEY)
+            latency_ms = entry.get("mcu_latency_ms")
             if tn is None or val_acc is None or test_acc is None or nr_params is None:
                 continue
             if nr_params <= 0:
                 continue
             if val_acc < args.min_val_acc:
                 continue
-            rows.append({
+            if args.sort == "latency" and (latency_ms is None or latency_ms <= 0):
+                continue
+            row = {
                 "study": study_name,
                 "trial_number": tn,
                 "validation_accuracy": val_acc,
@@ -114,7 +126,12 @@ def main(argv: list[str] | None = None) -> int:
                 "test_accuracy": test_acc,
                 "val_acc_per_param": val_acc / nr_params,
                 "test_acc_per_param": test_acc / nr_params,
-            })
+            }
+            if latency_ms is not None and latency_ms > 0:
+                row["mcu_latency_ms"] = latency_ms
+                row["val_acc_per_ms"] = val_acc / latency_ms
+                row["test_acc_per_ms"] = test_acc / latency_ms
+            rows.append(row)
             n_used += 1
         if n_used:
             print(f"Study '{study_name}': {n_used} trials with {args.bits}-bit/"
@@ -128,29 +145,50 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
 
-    rows.sort(key=lambda r: r["val_acc_per_param"], reverse=True)
+    # Selection (min-accuracy filter + ranking) uses validation results only;
+    # test accuracy is reported in the table for reference and never influences
+    # which models are chosen.
+    rows.sort(key=lambda r: r[sort_key], reverse=True)
     top = rows[: args.n]
 
-    header = (
-        f"{'study':<22}{'trial':>6}{'val_acc':>9}{'nr_params':>11}"
-        f"{'test_acc':>10}{'val/nr':>12}{'test/nr':>12}"
-    )
+    if args.sort == "latency":
+        header = (
+            f"{'study':<22}{'trial':>6}{'val_acc':>9}{'lat_ms':>10}"
+            f"{'test_acc':>10}{'val/ms':>12}{'test/ms':>12}"
+        )
+    else:
+        header = (
+            f"{'study':<22}{'trial':>6}{'val_acc':>9}{'nr_params':>11}"
+            f"{'test_acc':>10}{'val/nr':>12}{'test/nr':>12}"
+        )
     print("\n" + header)
     print("-" * len(header))
     for r in top:
-        print(
-            f"{r['study']:<22}{r['trial_number']:>6}"
-            f"{r['validation_accuracy']:>9.2f}"
-            f"{r['nr_parameters']:>11}"
-            f"{r['test_accuracy']:>10.2f}"
-            f"{r['val_acc_per_param']:>12.5f}"
-            f"{r['test_acc_per_param']:>12.5f}"
-        )
+        if args.sort == "latency":
+            print(
+                f"{r['study']:<22}{r['trial_number']:>6}"
+                f"{r['validation_accuracy']:>9.2f}"
+                f"{r['mcu_latency_ms']:>10.2f}"
+                f"{r['test_accuracy']:>10.2f}"
+                f"{r['val_acc_per_ms']:>12.5f}"
+                f"{r['test_acc_per_ms']:>12.5f}"
+            )
+        else:
+            print(
+                f"{r['study']:<22}{r['trial_number']:>6}"
+                f"{r['validation_accuracy']:>9.2f}"
+                f"{r['nr_parameters']:>11}"
+                f"{r['test_accuracy']:>10.2f}"
+                f"{r['val_acc_per_param']:>12.5f}"
+                f"{r['test_acc_per_param']:>12.5f}"
+            )
     print("-" * len(header))
     filter_note = (
         f" (min val acc {args.min_val_acc:.2f}%)" if args.min_val_acc > 0.0 else ""
     )
-    print(f"Ranked by validation accuracy / nr_parameters "
+    sort_note = ("validation accuracy / mcu_latency_ms" if args.sort == "latency"
+                 else "validation accuracy / nr_parameters")
+    print(f"Ranked by {sort_note} "
           f"({args.bits}-bit, {args.strat}), top {args.n} of {len(rows)} total"
           f"{filter_note}.")
     return 0

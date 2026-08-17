@@ -43,7 +43,9 @@ class _TwoMarkerHandler(HandlerBase):
                    markeredgewidth=0.6, markersize=9, transform=trans),
         ]
 
-def create_mcu_pareto_plot(studies_data, title):
+def create_mcu_pareto_plot(studies_data, title,
+                           accuracy_field="test_quantized_accuracy",
+                           accuracy_label=None):
     """
     Plot PC Pareto front with MCU-tested models highlighted, plus a separate
     panel showing MCU accuracy vs MCU latency for those models.
@@ -61,6 +63,13 @@ def create_mcu_pareto_plot(studies_data, title):
         'color', 'color_par', 'idx'.
     title : str
         Used in the plot title and saved file names.
+    accuracy_field : str
+        results.json field plotted as the y-axis accuracy in the right panel
+        (e.g. ``test_quantized_accuracy``, ``test_quantized_accuracy_int16``,
+        ``test_quantized_accuracy_strat``, ``test_float_accuracy``).
+    accuracy_label : str, optional
+        Y-axis label for the right panel.  Falls back to
+        ``Accuracy on validation set`` when not given.
     """
     fig = plt.figure(figsize=(14, 6))
     gs = gridspec.GridSpec(1, 2, width_ratios=[1, 1])
@@ -101,7 +110,7 @@ def create_mcu_pareto_plot(studies_data, title):
         mcu_pts = []
         if sd.get("results_data"):
             for rd in sd["results_data"]:
-                mcu_acc = rd.get("test_quantized_accuracy", np.nan)
+                mcu_acc = rd.get(accuracy_field, np.nan)
                 mcu_lat = rd.get("mcu_latency_ms", np.nan)
                 float_acc = rd.get("test_float_accuracy", np.nan)
                 if not np.isnan(mcu_acc) and not np.isnan(mcu_lat) and not np.isnan(float_acc):
@@ -201,7 +210,7 @@ def create_mcu_pareto_plot(studies_data, title):
 
     # ── Right panel decorations ──────────────────────────────────────────────
     ax_mcu.set_xlabel(LATENCY_MCU_LABEL, fontsize=11)
-    ax_mcu.set_ylabel(ACCURACY_LABEL, fontsize=11)
+    ax_mcu.set_ylabel(accuracy_label or ACCURACY_LABEL, fontsize=11)
     ax_mcu.set_title("MCU Accuracy vs Latency", fontsize=12, fontweight="bold")
     ax_mcu.grid(True, alpha=0.3, linestyle="--")
 

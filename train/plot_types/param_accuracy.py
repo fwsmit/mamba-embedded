@@ -23,30 +23,6 @@ ALPHA_SELECTED = 0.95
 MARKER_SELECTED = "D"
 
 
-# (--size, --quantization) → (results.json accuracy field, y-axis label)
-ACCURACY_FIELDS = {
-    (32, "no"): "test_float_accuracy",
-    (16, "percent"): "test_quantized_accuracy_int16",
-    (8, "percent"): "test_quantized_accuracy",
-    (8, "tqt"): "test_quantized_accuracy_strat",
-}
-
-# Validation-set counterparts of the test fields above; used to select the
-# highlighted models from the Pareto front (plotting stays on the test fields).
-SELECTION_FIELDS = {
-    (32, "no"): "float_accuracy",
-    (16, "percent"): "quantized_accuracy_int16",
-    (8, "percent"): "quantized_accuracy",
-    (8, "tqt"): "quantized_accuracy_strat",
-}
-
-ACCURACY_LABELS = {
-    (32, "no"): "Float accuracy (%)",
-    (16, "percent"): "Quantized accuracy (int16, %)",
-    (8, "percent"): "Quantized accuracy (int8, %)",
-    (8, "tqt"): "Quantized accuracy (int8, TQT, %)",
-}
-
 # ── Literature reference points (overlaid for HAR studies) ──────────────────
 # Sources collected in har-numbers-literature.md. To add a new point, append a
 # dict with these keys:
@@ -83,20 +59,6 @@ HAR_LITERATURE_POINTS = [
     dict(name="DeepConvLSTM", params=136000, value=93.53, metric="f1",
          source="BabyMamba-HAR", cost=15.51, cost_unit="MACs"),
 ]
-
-
-def resolve_accuracy(size, quantization):
-    """Map a (--size, --quantization) pair to the test results.json accuracy
-    field, its validation-set counterpart (used to select the highlighted
-    models), and the y-axis label."""
-    key = (size, quantization)
-    if key not in ACCURACY_FIELDS:
-        supported = ", ".join(
-            f"--size {s} --quantization {q}" for s, q in ACCURACY_FIELDS)
-        raise ValueError(
-            f"Unsupported combination --size {size} --quantization {quantization}. "
-            f"Supported combinations: {supported}.")
-    return ACCURACY_FIELDS[key], SELECTION_FIELDS[key], ACCURACY_LABELS[key]
 
 
 def pareto_mask(x, y):

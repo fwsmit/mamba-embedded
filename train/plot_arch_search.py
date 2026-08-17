@@ -10,6 +10,7 @@ Usage:
   python plot_arch_search.py --plot accuracy --bar config/arch-mamba1-kws.yaml
   python plot_arch_search.py --plot pareto --use-mcu config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot latency config/arch-mamba1-har.yaml
+  python plot_arch_search.py --plot mcu_pareto --size 8 --quantization tqt config/arch-mamba1-har.yaml
 """
 
 import argparse
@@ -30,14 +31,14 @@ import warnings
 
 from .plot_types.profiling import create_profiling_plot
 from .plot_types.stacked_profiling import create_stacked_profiling_plot
-from .plot_types.common import create_out_dirs
+from .plot_types.common import create_out_dirs, resolve_accuracy
 from .plot_types.generic_scatter import create_generic_scatter_plot
 from .plot_types.accuracy import create_accuracy_comparison_bar_plot, create_accuracy_comparison_plot
 from .plot_types.accuracy_grid import create_accuracy_grid_plot
 from .plot_types.quantization_loss import create_quantization_loss_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
 from .plot_types.latency_correlation import create_latency_correlation_plot
-from .plot_types.param_accuracy import create_param_accuracy_plot, resolve_accuracy
+from .plot_types.param_accuracy import create_param_accuracy_plot
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -141,7 +142,8 @@ def main():
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'accuracy_grid' (combined accuracy subplot grid sharing axes), "
-             "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot), "
+             "'mcu_pareto' (PC Pareto front with MCU-tested highlights + MCU perf plot; "
+             "--size/--quantization select the accuracy variant), "
              "'latency' (PC latency vs MCU latency scatter plot), "
              "'scatter' (generic scatter plot of two results.json fields), "
              "'profiling' (MCU operator profiling bar chart for a specific trial), "
@@ -169,7 +171,7 @@ def main():
         help="Trial number for the 'profiling' plot."
     )
     parser.add_argument("--absolute", action="store_true", default=False,
-                        help="For --plot stacked: plot summed latency (ms) instead of normalised %.")
+                        help="For --plot stacked: plot summed latency (ms) instead of normalised %%.")
     parser.add_argument(
         "--use-mcu", action="store_true",
         help="Use MCU accuracy and latency from results.json instead of PC objectives "
@@ -215,13 +217,14 @@ def main():
     )
     parser.add_argument(
         "--size", type=int, choices=[32, 16, 8], default=8,
-        help="Bit width for --plot param_accuracy: 32 (float, unquantized), 16 "
-             "(int16) or 8 (int8). Default: 8."
+        help="Bit width for --plot param_accuracy and --plot mcu_pareto: 32 "
+             "(float, unquantized), 16 (int16) or 8 (int8). Default: 8."
     )
     parser.add_argument(
         "--quantization", type=str, choices=["no", "percent", "tqt"], default="percent",
-        help="Quantization method for --plot param_accuracy: 'no' (float), "
-             "'percent' (standard PTQ) or 'tqt' (KL-TQT). Default: percent."
+        help="Quantization method for --plot param_accuracy and --plot "
+             "mcu_pareto: 'no' (float), 'percent' (standard PTQ) or 'tqt' "
+             "(KL-TQT). Default: percent."
     )
     args = parser.parse_args()
 
@@ -303,8 +306,15 @@ def main():
         plot_created = True
 
     elif args.plot == "mcu_pareto":
+        try:
+            accuracy_field, _, accuracy_label = resolve_accuracy(
+                args.size, args.quantization)
+        except ValueError as e:
+            parser.error(str(e))
         load_results_data(studies_data, repo_root)
-        create_mcu_pareto_plot(studies_data, title)
+        create_mcu_pareto_plot(studies_data, title,
+                               accuracy_field=accuracy_field,
+                               accuracy_label=accuracy_label)
         plot_created = True
 
     elif args.plot == "latency":
