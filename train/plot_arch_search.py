@@ -11,11 +11,11 @@ Usage:
   python plot_arch_search.py --plot pareto --use-mcu config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot latency config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot mcu_pareto --size 8 --quantization tqt config/arch-mamba1-har.yaml
+  python plot_arch_search.py --plot importance config/arch-mamba1-har.yaml
 """
 
 import argparse
 import optuna
-from optuna.importance import PedAnovaImportanceEvaluator
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import ticker
@@ -39,6 +39,7 @@ from .plot_types.quantization_loss import create_quantization_loss_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
 from .plot_types.latency_correlation import create_latency_correlation_plot
 from .plot_types.param_accuracy import create_param_accuracy_plot
+from .plot_types.param_importance import create_param_importance_plot
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -138,7 +139,7 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss", "param_accuracy"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss", "param_accuracy", "importance"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'accuracy_grid' (combined accuracy subplot grid sharing axes), "
@@ -150,7 +151,9 @@ def main():
              "'stacked' (MCU operator latency stacked by trial across all MCU-tested trials), "
              "'quantization_loss' (quantization loss comparison across studies), or "
              "'param_accuracy' (nr of parameters vs accuracy with N models selected from the Pareto front; "
-             "for HAR studies, literature reference points are overlaid)."
+             "for HAR studies, literature reference points are overlaid), or "
+             "'importance' (hyperparameter importance per study, one panel per objective, "
+             "matching optuna-dashboard's PedAnova computation)."
     )
     parser.add_argument(
         "--bar", action="store_true",
@@ -203,6 +206,12 @@ def main():
     parser.add_argument(
         "--y-label", type=str, default="",
         help="Y-axis label for the scatter plot (optional)."
+    )
+    parser.add_argument(
+        "--y-zero-line", action="store_true",
+        help="For --plot scatter: draw a dashed reference line at y=0 "
+             "(useful e.g. for overfitting checks where positive values mean "
+             "test accuracy is below validation accuracy)."
     )
     parser.add_argument(
         "--n-models", type=int, default=10,
@@ -277,6 +286,7 @@ def main():
         studies_data.append({
             "name": display_name,
             "study_name": name,
+            "study": study,
             "df": df,
             "par": par,
             "color": color_base,
@@ -359,7 +369,8 @@ def main():
         load_results_data(studies_data, repo_root)
         create_generic_scatter_plot(studies_data, title,
                                     x_field=args.x_field, y_field=args.y_field,
-                                    x_label=args.x_label, y_label=args.y_label)
+                                    x_label=args.x_label, y_label=args.y_label,
+                                    y_zero_line=args.y_zero_line)
         plot_created = True
 
     elif args.plot == "quantization_loss":
@@ -396,6 +407,10 @@ def main():
 
         if create_profiling_plot(study_name, args.configs[0], args.trial, display_name):
             plot_created = True
+
+    elif args.plot == "importance":
+        create_param_importance_plot(studies_data)
+        plot_created = True
 
     elif args.plot == "stacked":
         # ── MCU operator latency stacked by trial across all MCU-tested trials ──

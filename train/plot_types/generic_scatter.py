@@ -33,11 +33,17 @@ _COMPUTED_FIELDS = {
            and not np.isnan(rd.get("test_quantized_accuracy_int16", np.nan))
         else np.nan
     ),
+    "val_test_float_gap": lambda rd: (
+        rd.get("float_accuracy", np.nan) - rd.get("test_float_accuracy", np.nan)
+        if not np.isnan(rd.get("float_accuracy", np.nan))
+           and not np.isnan(rd.get("test_float_accuracy", np.nan))
+        else np.nan
+    ),
 }
 
 
 def create_generic_scatter_plot(studies_data, title, x_field, y_field,
-                                x_label="", y_label=""):
+                                x_label="", y_label="", y_zero_line=False):
     """
     Scatter plot of *x_field* vs *y_field* extracted from each study's
     ``results.json`` data.
@@ -57,6 +63,10 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
         Label for the x-axis.  If empty, falls back to the field name.
     y_label : str
         Label for the y-axis.  If empty, falls back to the field name.
+    y_zero_line : bool
+        If True, draw a dashed reference line at y=0 (useful e.g. for
+        overfitting checks where positive values mean test accuracy is
+        below validation accuracy).
     """
     fig, ax = plt.subplots(figsize=(9, 7))
 
@@ -96,6 +106,8 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
     ax.set_ylabel(y_label or y_field, fontsize=11)
     ax.set_title(title, fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
+    if y_zero_line:
+        ax.axhline(0, color="black", linestyle="--", linewidth=1.0, alpha=0.7, zorder=2)
 
     # Scale x-axis labels by 1000 (e.g. bytes -> kB), keeping enough decimals
     # that zooming in does not round neighbouring values together.
@@ -116,7 +128,10 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
                         self.sig - 1 - np.floor(np.log10(span / self.scale)), 0, 8))
             return f"{x / self.scale:.{decimals}f}"
 
-    ax.xaxis.set_major_formatter(_ScaledKFormatter())
+    # Only apply the k-scaling (bytes -> kB) when values are large enough that
+    # scaling is meaningful; small fields (e.g. trial numbers) stay exact.
+    x_scale = 1000.0 if max(abs(v) for v in x_vals) > 1000 else 1.0
+    ax.xaxis.set_major_formatter(_ScaledKFormatter(scale=x_scale))
 
     ax.legend(handles=legend_handles,
               labels=legend_labels,

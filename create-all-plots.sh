@@ -61,3 +61,36 @@ python -m train.plot_arch_search --plot pareto --title "Pareto front comparison 
 # Compare parameter count with other studies
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/har/*
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
+
+# Hyperparameter importance
+python -m train.plot_arch_search --plot importance config/kws/*
+python -m train.plot_arch_search --plot importance config/har/*
+
+# Overfitting test
+# python -m train.plot_arch_search --plot scatter \
+#   --x-field number --y-field val_test_float_gap \
+#   --x-label "Trial number" --y-label "Validation - test accuracy (pp, float32)" \
+#   --title "Overfitting check: val - test accuracy by trial (KWS, float32)" \
+#   --y-zero-line --show \
+#   config/kws/*
+#
+# python -m train.plot_arch_search --plot scatter \
+#   --x-field number --y-field val_test_float_gap \
+#   --x-label "Trial number" --y-label "Validation - test accuracy (pp, float32)" \
+#   --title "Overfitting check: val - test accuracy by trial (HAR, float32)" \
+#   --y-zero-line --show \
+#   config/har/*
+#
+# python -m train.plot_arch_search --plot scatter \
+#   --x-field number --y-field val_test_float_gap \
+#   --x-label "Trial number" --y-label "Validation - test accuracy (pp, float32)" \
+#   --title "Overfitting check: val - test accuracy by trial (HAR bidir-mul, float32)" \
+#   --y-zero-line --show \
+#   config/har/arch-mamba1-har-bidir-mul.yaml
+#
+# python -m train.plot_arch_search --plot scatter \
+#   --x-field number --y-field val_test_float_gap \
+#   --x-label "Trial number" --y-label "Validation - test accuracy (pp, float32)" \
+#   --title "Overfitting check: val - test accuracy by trial (all, float32)" \
+#   --y-zero-line --show \
+#   config/kws/* config/har/*
