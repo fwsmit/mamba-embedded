@@ -225,8 +225,6 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
             parts = []
             if p["metric"] == "f1":
                 parts.append("F1")
-            if p.get("cost") is not None:
-                parts.append(f"{p['cost']:g}M {p.get('cost_unit', 'MACs')}")
             if p.get("note"):
                 parts.append(p["note"])
             suffix = f" ({', '.join(parts)})" if parts else ""
