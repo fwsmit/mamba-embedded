@@ -21,6 +21,13 @@ from .common import savefig
 
 ALPHA_SELECTED = 0.95
 MARKER_SELECTED = "D"
+FIGSIZE = (10.5, 8)
+AXIS_LABEL_SIZE = 14
+TICK_LABEL_SIZE = 12
+TITLE_SIZE = 16
+LEGEND_SIZE = 11
+ANNOTATION_SIZE = 10
+LITERATURE_ANNOTATION_SIZE = 9
 
 
 # ── Literature reference points (overlaid for HAR studies) ──────────────────
@@ -40,6 +47,10 @@ MARKER_SELECTED = "D"
 #               shown in the annotation
 LIT_COLOR = "#111111"
 LIT_MARKERS = {"accuracy": "X", "f1": "P"}
+LIT_ANNOTATION_OFFSETS = {
+    "TinierHAR": (-7, 10, "right"),
+    "TinyHAR": (7, -13, "left"),
+}
 HAR_LITERATURE_POINTS = [
     dict(name="Novac et al.", params=3958, value=92.41, metric="accuracy",
          source="arXiv:2105.13331"),
@@ -134,7 +145,7 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
     sel_field = selection_accuracy_field or accuracy_field
 
     print("Selecting from", sel_field)
-    fig, ax = plt.subplots(figsize=(9, 7))
+    fig, ax = plt.subplots(figsize=FIGSIZE)
 
     # Collect all data points across studies, remembering their origin.
     # Row format: (study index into studies_data, nr_parameters, test
@@ -184,12 +195,12 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
             xs = np.array([all_rows[i][1] for i in sel_rows])
             ys = np.array([all_rows[i][2] for i in sel_rows])
             ax.scatter(xs, ys, color=sd["color_par"], alpha=ALPHA_SELECTED,
-                       s=70, marker=MARKER_SELECTED, edgecolors="white",
-                       linewidths=0.6, zorder=4)
+                       s=100, marker=MARKER_SELECTED, edgecolors="white",
+                       linewidths=0.8, zorder=4)
             for i in sel_rows:
                 ax.annotate(str(all_rows[i][4]), (all_rows[i][1], all_rows[i][2]),
                             textcoords="offset points", xytext=(7, 7),
-                            fontsize=7, fontweight="bold",
+                            fontsize=ANNOTATION_SIZE, fontweight="bold",
                             color=sd["color_par"], zorder=5)
 
             legend_elements.append(
@@ -209,9 +220,9 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
            for sd in studies_data):
         metrics_plotted = set()
         for p in HAR_LITERATURE_POINTS:
-            ax.scatter([p["params"]], [p["value"]], color=LIT_COLOR, s=45,
+            ax.scatter([p["params"]], [p["value"]], color=LIT_COLOR, s=65,
                        marker=LIT_MARKERS.get(p["metric"], "o"), zorder=4,
-                       linewidths=1.0)
+                       linewidths=1.2)
         x0, x1 = ax.get_xlim()
         for i, p in enumerate(HAR_LITERATURE_POINTS):
             # Annotate to the left for points on the right side of the plot,
@@ -222,6 +233,8 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
             dx = -7 if right_side else 7
             ha = "right" if right_side else "left"
             dy = 7 if i % 2 == 0 else -13
+            if p["name"] in LIT_ANNOTATION_OFFSETS:
+                dx, dy, ha = LIT_ANNOTATION_OFFSETS[p["name"]]
             parts = []
             if p["metric"] == "f1":
                 parts.append("F1")
@@ -230,20 +243,24 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
             suffix = f" ({', '.join(parts)})" if parts else ""
             ax.annotate(p["name"] + suffix, (p["params"], p["value"]),
                         textcoords="offset points", xytext=(dx, dy), ha=ha,
-                        fontsize=6.5, color=LIT_COLOR, zorder=5)
+                        fontsize=LITERATURE_ANNOTATION_SIZE, color=LIT_COLOR,
+                        bbox=dict(facecolor="white", edgecolor="none", alpha=0.8,
+                                  pad=1.5), zorder=5)
             metric = p["metric"]
             if metric not in metrics_plotted:
                 metrics_plotted.add(metric)
                 lit_handles.append(
                     Line2D([0], [0], marker=LIT_MARKERS.get(metric, "o"),
                            color="w", markerfacecolor=LIT_COLOR,
-                           markeredgecolor=LIT_COLOR, markersize=6,
+                           markeredgecolor=LIT_COLOR, markersize=8,
                            linestyle="none", label=f"Literature ({metric})"))
                 lit_labels.append(f"Literature ({metric})")
 
-    ax.set_xlabel("Number of parameters", fontsize=11)
-    ax.set_ylabel(accuracy_label or f"{accuracy_field.replace('_', ' ')} (%)", fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.set_xlabel("Number of parameters", fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(accuracy_label or f"{accuracy_field.replace('_', ' ')} (%)",
+                  fontsize=AXIS_LABEL_SIZE)
+    ax.set_title(title, fontsize=TITLE_SIZE, fontweight="bold", pad=12)
+    ax.tick_params(axis="both", labelsize=TICK_LABEL_SIZE)
     ax.grid(True, alpha=0.3, linestyle="--")
 
     # x-axis in thousands (e.g. 5k = 5000 parameters); hide minor log-tick
@@ -260,6 +277,7 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
 
     ax.legend(handles=legend_elements + lit_handles,
               labels=legend_labels + lit_labels,
-              framealpha=0.9, fontsize=9)
+              framealpha=0.9, fontsize=LEGEND_SIZE,
+              borderpad=0.7, labelspacing=0.5)
 
-    savefig(fig, title, "param_accuracy")
+    savefig(fig, title, "param_accuracy", dpi=300)
