@@ -1,0 +1,33 @@
+hydra:
+  job:
+    chdir: false
+  output_subdir: null
+
+BATCHSIZE: 128
+EPOCHS: 2
+MODEL: mamba-1
+DATASET: kws
+EXPERIMENT_NAME: "bidir-mul-multi-layer"
+bidirectional: true
+bidirectional_strategy: ew_multiply
+n_trials: 100
+quantization_precision: [8, 16]
+quantization_methods: [standard, strat-kl-tqt]
+plot_description: "Multi-layer bidirectional (mul)"
+
+SEARCH_SPACE:
+  d_model:
+    low: 8
+    high: 32
+  d_state:
+    low: 8
+    high: 16
+  d_conv:
+    low: 2
+    high: 4
+  expand:
+    low: 1
+    high: 4
+  n_layers:
+    low: 2
+    high: 5
