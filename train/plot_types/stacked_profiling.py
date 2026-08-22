@@ -77,8 +77,6 @@ def create_stacked_profiling_plot(study_name, config_path, title, absolute=False
     ylab = "Total Latency on MCU (ms)" if absolute else "Share of MCU Latency (%)"
     ax.set_ylabel(ylab, fontsize=11)
     ax.set_xlabel("Trial (sorted by total latency)", fontsize=11)
-    ax.set_title(f"MCU Operator Profiling across trials — {title}",
-                 fontsize=13, fontweight="bold")
     ax.grid(axis="y", alpha=0.3, linestyle="--")
     if absolute:
         ax.set_ylim(0, max(bottom) * 1.15)

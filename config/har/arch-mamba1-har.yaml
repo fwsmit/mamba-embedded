@@ -12,7 +12,7 @@ bidirectional: false
 n_trials: 149
 quantization_precision: [8, 16]
 quantization_methods: [standard, strat-kl-tqt]
-plot_description: "single direction"
+plot_description: "Single direction"
 
 SEARCH_SPACE:
   d_model:

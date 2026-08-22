@@ -113,7 +113,6 @@ def confusion_matrix_onnx(onnx_path, test_loader, idx2label, device=None):
         yticklabels=class_names,
         xlabel="Predicted label",
         ylabel="True label",
-        title=f"Confusion Matrix — {Path(onnx_path).stem}\nAccuracy: {accuracy*100:.2f}%",
     )
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 

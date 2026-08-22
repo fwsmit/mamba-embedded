@@ -35,14 +35,12 @@ This script:
 ## Training a Model
 
 ```bash
-# Activate conda environment first
-conda activate torch-pascal
-
-# Train and export to ONNX
-python -m train.main
+# Run each command inside the torch-pascal conda environment (conda run keeps
+# the env active per-command, so it works across separate shell invocations)
+conda run -n torch-pascal python -m train.main
 
 # Quantize the ONNX model to int8 ESP-DL format
-python -m train.quantize --model mamba-1 --dataset har
+conda run -n torch-pascal python -m train.quantize --model mamba-1 --dataset har
 ```
 
 Set `MODEL` (e.g., `mamba-1`, `mamba-3`) and `DATASET` (e.g., `har`, `kws`) as environment variables.
@@ -52,8 +50,7 @@ Set `MODEL` (e.g., `mamba-1`, `mamba-3`) and `DATASET` (e.g., `har`, `kws`) as e
 Run an Optuna-based hyperparameter search with a pre-defined configuration using Hydra:
 
 ```bash
-conda activate torch-pascal
-python -m train.arch_search config/arch-mamba1-kws.yaml
+conda run -n torch-pascal python -m train.arch_search config/arch-mamba1-kws.yaml
 ```
 
 The positional argument is the path to a config YAML file. Available configs in `config/`:
@@ -208,9 +205,8 @@ When `quantization_methods` includes `strat-kl-tqt`, its metrics are stored unde
 To list the n best models (ranked by a validation-based efficiency metric) across one or more studies, for a given quantization precision and method:
 
 ```bash
-conda activate torch-pascal
-python -m train.best_models config/kws/arch-mamba1-kws-2.yaml config/har/arch-mamba1-har.yaml --n 10 --bits 8 --strat ptq
-python -m train.best_models config/kws/arch-mamba1-kws-2.yaml config/har/arch-mamba1-har.yaml --n 10 --bits 8 --strat ptq --sort latency
+conda run -n torch-pascal python -m train.best_models config/kws/arch-mamba1-kws-2.yaml config/har/arch-mamba1-har.yaml --n 10 --bits 8 --strat ptq
+conda run -n torch-pascal python -m train.best_models config/kws/arch-mamba1-kws-2.yaml config/har/arch-mamba1-har.yaml --n 10 --bits 8 --strat ptq --sort latency
 ```
 
 `--bits` selects 8 or 16, `--strat` selects `ptq` or `tqt`, and `--sort` selects the ranking metric: `param` (default) ranks by validation accuracy / nr_parameters, `latency` ranks by validation accuracy / mcu_latency_ms (only trials with MCU latency data are considered). It reads each study's `experiments/<study>/results.json` and prints a table with trial number, validation accuracy, cost (nr parameters or MCU latency in ms), test accuracy, and accuracy/cost for both validation and test sets. Selection (accuracy filter and ranking) always uses validation results; test accuracy is reported for reference only.
@@ -220,12 +216,11 @@ python -m train.best_models config/kws/arch-mamba1-kws-2.yaml config/har/arch-ma
 Pareto front comparison and accuracy plots are generated with `train/plot_arch_search.py`.
 
 ```bash
-conda activate torch-pascal
-python -m train.plot_arch_search --plot pareto config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml
-python -m train.plot_arch_search --plot accuracy config/har/arch-mamba1-har.yaml
-python -m train.plot_arch_search --plot accuracy_grid config/kws/arch-mamba1-kws-2.yaml config/kws/arch-mamba1-kws-bidir.yaml config/kws/arch-mamba1-kws-bidir-mul.yaml config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml config/har/arch-mamba1-har-bidir-mul.yaml
-python -m train.plot_arch_search --plot mcu_pareto config/har/arch-mamba1-har.yaml
-python -m train.plot_arch_search --plot mcu_pareto --size 8 --quantization tqt config/har/arch-mamba1-har.yaml
+conda run -n torch-pascal python -m train.plot_arch_search --plot pareto config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml
+conda run -n torch-pascal python -m train.plot_arch_search --plot accuracy config/har/arch-mamba1-har.yaml
+conda run -n torch-pascal python -m train.plot_arch_search --plot accuracy_grid config/kws/arch-mamba1-kws-2.yaml config/kws/arch-mamba1-kws-bidir.yaml config/kws/arch-mamba1-kws-bidir-mul.yaml config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml config/har/arch-mamba1-har-bidir-mul.yaml
+conda run -n torch-pascal python -m train.plot_arch_search --plot mcu_pareto config/har/arch-mamba1-har.yaml
+conda run -n torch-pascal python -m train.plot_arch_search --plot mcu_pareto --size 8 --quantization tqt config/har/arch-mamba1-har.yaml
 ```
 
 Four plot types are available:
@@ -236,9 +231,9 @@ Four plot types are available:
 | `accuracy` | Scatter plot of quantized accuracy (y) vs float accuracy (x), with distinct points per quantization method (int8, and int16 / strat-kl-tqt when present) and a y=x dotted reference line |
 | `accuracy_grid` | Combined scatter plot: one panel per study in a shared grid with common axis limits/labels, a single shared legend and a y=x reference line in every panel |
 | `mcu_pareto` | Two-panel figure: (left) PC Pareto front with ★ markers for MCU-tested trials; (right) MCU accuracy vs MCU latency for those models, annotated with trial numbers. Use `--size` (32 / 16 / 8) with `--quantization` (`no` / `percent` / `tqt`, default `percent`) to pick which accuracy variant is plotted in the right panel (float / int16 PTQ / int8 PTQ / int8 KL-TQT), exactly as for `param_accuracy` |
-| `param_accuracy` | Scatter plot of nr of parameters (x, logarithmic axis) vs accuracy (y) from `results.json`, with the N most parameter-efficient models selected from the combined Pareto front (max accuracy, min parameters) across ALL studies highlighted as diamonds and annotated with trial numbers. The models are selected using the **validation-set** accuracy but plotted at their **test-set** accuracy. Use `--n-models N` (default 10) to control how many models are selected in total (not per study). Use `--min-val-acc N` to restrict selection to models scoring strictly above N% on the validation set first. Use `--size` (32 float / 16 / 8 bits, default 8) with `--quantization` (`no` / `percent` / `tqt`, default `percent`) to pick the accuracy metric: `32+no` → float, `16+percent` → int16 PTQ, `8+percent` → int8 PTQ, `8+tqt` → int8 KL-TQT. For HAR studies, reference points from the literature (`har-numbers-literature.md`, see `HAR_LITERATURE_POINTS` in `train/plot_types/param_accuracy.py`) are overlaid as black markers — accuracy values as crosses, F1-scores as pentagons — with the F1/ compute-cost / dataset-average nuances annotated next to each point. |
+| `param_accuracy` | Scatter plot of nr of parameters (x, logarithmic axis) vs accuracy (y) from `results.json`, with the N most parameter-efficient models selected from the combined Pareto front (max accuracy, min parameters) across ALL studies highlighted as diamonds and annotated with trial numbers. The models are selected using the **validation-set** accuracy but plotted at their **test-set** accuracy. Use `--n-models N` (default 10) to control how many models are selected in total (not per study). Use `--min-val-acc N` to restrict selection to models scoring strictly above N% on the validation set first. Use `--size` (32 float / 16 / 8 bits, default 8) with `--quantization` (`no` / `percent` / `tqt`, default `percent`) to pick the accuracy metric: `32+no` → float, `16+percent` → int16 PTQ, `8+percent` → int8 PTQ, `8+tqt` → int8 KL-TQT. For HAR studies, reference points from the literature (`har-numbers-literature.md`, see `HAR_LITERATURE_POINTS` in `train/plot_types/param_accuracy.py`) are overlaid as black markers — accuracy values as crosses, F1-scores as pentagons — with the F1-score / dataset-average nuances annotated next to each point (compute cost in MACs/FLOPs is not shown). |
 | `stacked` | Stacked bar chart of MCU operator latency across ALL MCU-tested trials (one bar per trial, segment per operator, sorted by total latency). Normalised to 100% by default; use `--absolute` for summed ms. Total latency annotated above each bar |
-| `importance` | Hyperparameter importance per study, one figure per study with one panel per objective (Accuracy/Latency). Importance values are computed with optuna's PedAnova evaluator on the raw objective value — the same computation as optuna-dashboard — so the numbers match the dashboard; bars are ordered most-important-first with value labels. (PedAnova measures importance for *low* target values, so the Accuracy panel shows which parameters drive accuracy *down*, e.g. lr causing diverged training.) Figures are titled with the study name (plus its `plot_description` when set) so files are unique when multiple configs are passed |
+| `importance` | Two heatmaps of hyperparameter importance (one per objective: Accuracy/Latency): rows are the studies, columns are the hyperparameters, cells coloured by importance with value labels. Importance values are computed with optuna's PedAnova evaluator on the raw objective value — the same computation as optuna-dashboard — so the numbers match the dashboard. (PedAnova measures importance for *low* target values, so the Accuracy heatmap shows which parameters drive accuracy *down*, e.g. lr causing diverged training.) Rows are ordered by dataset (HAR first) then architecture variant (single → bidir add → bidir mul); the 0–1 colour scale is shared across both heatmaps. Pass all configs at once (e.g. `config/har/* config/kws/*`) to get the full 6-study grid. |
 | `quantization_loss` | Paper-ready single panel comparing quantization loss per strategy (8-bit PTQ, 8-bit KL-TQT, 16-bit PTQ). Architecture variants (bidirectional add / mul / single direction) are pooled: each chart shows exactly one column per strategy (n=42 for HAR, n=30 for KWS), each with a light semi-transparent raw-point strip (colour + shape per strategy — circle/square/triangle survive grayscale printing) over a semi-transparent boxplot (its internal line marks the median); a black diamond marks the mean (value suffixed `*` when pulled by outliers), with its numeric label placed beside/above the box so it never collides with box edges. A symlog y-axis (logarithmic with a linear band near zero) keeps the dense near-zero bulk and large outliers readable, with plain round-number tick labels (e.g. 0, 5, 10, 20, 40, 80) instead of log-decade numbers, and a dashed zero line as the "no change" reference (points below = quantized model more accurate); a horizontal legend sits below the plot. The per-column n= count is merged into the x tick labels and a per-chart title ("HAR:"/"KWS: Quantization Loss by Strategy", inferred from the study title) identifies the dataset. Single-column figure size, exported at 300 DPI PNG plus PDF and SVG vectors. Pass `--ylim LOW HIGH` to fix the y-range (e.g. identical values for KWS and HAR) so companion figures share a consistent axis |
 
 Pass `--bar` together with `--plot accuracy` to draw a grouped bar chart (one bar group per trial, one bar per quantization method) instead of the scatter plot. Without `--bar`, the accuracy plot is unchanged.

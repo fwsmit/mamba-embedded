@@ -354,6 +354,7 @@ extern "C" void app_main(void) {
     return;
   }
 
+#if 0  // DISABLED: whole-dataset accuracy test is time consuming
   //
   // Run inference on dataset samples
   //
@@ -363,10 +364,12 @@ extern "C" void app_main(void) {
     cleanup_model(model);
     return;
   }
+#endif
 
   //
-  // Profiling summary (grouped by op type)
+  // Memory profiling (built-in) and latency profiling summary (grouped by op type)
   //
+  model->profile_memory();
   print_grouped_profile(model);
 
   //

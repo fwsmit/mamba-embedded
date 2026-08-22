@@ -21,8 +21,8 @@ python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-f
 python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-field test_quantized_accuracy --x-label "Parameter Size (bytes, int8 quantized)" --y-label "Accuracy on MCU (%)" --title "Parameter size vs MCU accuracy (KWS)" config/kws/*
 
 # Scatter: nr parameters vs accuracy
-python -m train.plot_arch_search --view --plot scatter --x-field nr_parameters --y-field test_quantized_accuracy --x-label "Parameters (K)" --y-label "8-bit quantized accuracy (%)" --title "Parameters vs accuracy (KWS)" config/kws/* --show
-python -m train.plot_arch_search --view --plot scatter --x-field nr_parameters --y-field test_quantized_accuracy --x-label "Parameters (K)" --y-label "8-bit quantized accuracy (%)" --title "Parameters vs accuracy (HAR)" config/har/* --show
+python -m train.plot_arch_search --plot scatter --x-field nr_parameters --y-field test_quantized_accuracy --x-label "Parameters (K)" --y-label "8-bit quantized accuracy (%)" --title "Parameters vs accuracy (KWS)" config/kws/*
+python -m train.plot_arch_search --plot scatter --x-field nr_parameters --y-field test_quantized_accuracy --x-label "Parameters (K)" --y-label "8-bit quantized accuracy (%)" --title "Parameters vs accuracy (HAR)" config/har/*
 
 # Quantization loss
 python -m train.plot_arch_search --plot quantization_loss --title "Quantization loss per strategy (KWS)" config/kws/*
@@ -56,15 +56,14 @@ python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mam
 python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mamba bidirectional (add) (HAR)" config/har/arch-mamba1-har-bidir.yaml
 python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mamba bidirectional (mul) (HAR)" config/har/arch-mamba1-har-bidir-mul.yaml
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (HAR)" config/har/*
-python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" config/kws/*
+python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" config/kws/* config/kws-multi-layer/*
 
 # Compare parameter count with other studies
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/har/*
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
 
 # Hyperparameter importance
-python -m train.plot_arch_search --plot importance config/kws/*
-python -m train.plot_arch_search --plot importance config/har/*
+python -m train.plot_arch_search --plot importance config/har/* config/kws/*
 
 # Overfitting test
 # python -m train.plot_arch_search --plot scatter \

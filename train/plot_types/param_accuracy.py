@@ -259,7 +259,6 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
     ax.set_xlabel("Number of parameters", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(accuracy_label or f"{accuracy_field.replace('_', ' ')} (%)",
                   fontsize=AXIS_LABEL_SIZE)
-    ax.set_title(title, fontsize=TITLE_SIZE, fontweight="bold", pad=12)
     ax.tick_params(axis="both", labelsize=TICK_LABEL_SIZE)
     ax.grid(True, alpha=0.3, linestyle="--")
 

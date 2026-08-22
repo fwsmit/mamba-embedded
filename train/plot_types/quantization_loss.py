@@ -168,12 +168,6 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     ax.tick_params(axis="both", labelsize=8)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
-    # Per-chart title: tells the reader which dataset the figure is for.
-    dataset = next((d for d in ("har", "kws") if d in title.lower()), "")
-    prefix = dataset.upper() if dataset else "Quantization Loss"
-    ax.set_title(f"{prefix}: Quantization Loss by Strategy",
-                 fontsize=10, fontweight="bold")
-
     # ── Legend: one entry per strategy, laid out horizontally below the plot.
     handles = [Line2D([0], [0], marker=STRATEGIES[si][3], color="w",
                       markerfacecolor=STRATEGIES[si][2], markersize=6,

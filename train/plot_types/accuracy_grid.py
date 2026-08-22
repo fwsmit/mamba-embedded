@@ -85,7 +85,6 @@ def create_accuracy_grid_plot(studies_data, title, ncols=2):
         ax.set_xlim(lo, hi)
         ax.set_ylim(lo, hi)
         ax.set_aspect("equal", adjustable="box")
-        ax.set_title(sd["name"], fontsize=12, fontweight="bold", pad=10)
         ax.grid(alpha=0.3, linestyle="--")
         ax.tick_params(labelsize=8)
 
@@ -119,7 +118,6 @@ def create_accuracy_grid_plot(studies_data, title, ncols=2):
     if kws_studies and har_studies:
         title += f"\n(KWS: {len(kws_studies)} studies, HAR: {len(har_studies)} studies)"
 
-    fig.suptitle(title, y=0.98, fontsize=16, fontweight="bold", fontfamily='serif')
 
     # Tighten layout
     plt.tight_layout()

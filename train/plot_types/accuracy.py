@@ -84,7 +84,6 @@ def create_accuracy_comparison_plot(study_name, data, title):
 
     ax.set_xlabel("Float Accuracy (%)", fontsize=11)
     ax.set_ylabel("Quantized Accuracy (%)", fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight="bold")
     ax.legend(fontsize=10)
     ax.grid(alpha=0.3, linestyle="--")
 
@@ -144,7 +143,6 @@ def create_accuracy_comparison_bar_plot(study_name, data, title):
                        fontsize=9)
     ax.set_xlabel("Trial nr", fontsize=11)
     ax.set_ylabel("Accuracy (%)", fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight="bold")
     ax.legend(fontsize=10, loc="lower left", framealpha=1.0)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 

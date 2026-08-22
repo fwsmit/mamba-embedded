@@ -11,7 +11,7 @@ Usage:
   python plot_arch_search.py --plot pareto --use-mcu config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot latency config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot mcu_pareto --size 8 --quantization tqt config/arch-mamba1-har.yaml
-  python plot_arch_search.py --plot importance config/arch-mamba1-har.yaml
+  python plot_arch_search.py --plot importance config/har/* config/kws/*
 """
 
 import argparse
@@ -152,7 +152,8 @@ def main():
              "'quantization_loss' (quantization loss comparison across studies), or "
              "'param_accuracy' (nr of parameters vs accuracy with N models selected from the Pareto front; "
              "for HAR studies, literature reference points are overlaid), or "
-             "'importance' (hyperparameter importance per study, one panel per objective, "
+             "'importance' (two hyperparameter importance heatmaps — one per objective, "
+             "Accuracy/Latency — with studies as rows and hyperparameters as columns, "
              "matching optuna-dashboard's PedAnova computation)."
     )
     parser.add_argument(

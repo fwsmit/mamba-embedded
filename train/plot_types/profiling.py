@@ -68,8 +68,6 @@ def create_profiling_plot(study_name, config_path, trial_number, title):
     ax.set_xticklabels(op_names, rotation=45, ha="right", fontsize=9)
     ax.set_ylabel("Total Latency on MCU (ms)", fontsize=11)
     ax.set_xlabel("Operator Type", fontsize=11)
-    ax.set_title(f"MCU Operator Profiling — Trial {trial_number}  ({title})",
-                 fontsize=13, fontweight="bold")
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
     # Add a bit of headroom

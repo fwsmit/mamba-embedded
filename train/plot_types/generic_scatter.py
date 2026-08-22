@@ -104,7 +104,6 @@ def create_generic_scatter_plot(studies_data, title, x_field, y_field,
 
     ax.set_xlabel(x_label or x_field, fontsize=11)
     ax.set_ylabel(y_label or y_field, fontsize=11)
-    ax.set_title(title, fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
     if y_zero_line:
         ax.axhline(0, color="black", linestyle="--", linewidth=1.0, alpha=0.7, zorder=2)

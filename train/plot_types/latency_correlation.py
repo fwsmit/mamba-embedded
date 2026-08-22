@@ -115,14 +115,6 @@ def create_latency_correlation_plot(studies_data, title, use_param_size=False):
 
     ax.set_xlabel(x_label, fontsize=11)
     ax.set_ylabel("Latency on MCU (ms)", fontsize=11)
-    ds_label = _dataset_label(title)
-    if use_param_size:
-        plot_title = "Parameter Size vs MCU Latency"
-    else:
-        plot_title = "PC Latency vs MCU Latency"
-    if ds_label:
-        plot_title += f" ({ds_label})"
-    ax.set_title(plot_title, fontsize=13, fontweight="bold")
     ax.grid(True, alpha=0.3, linestyle="--")
 
     # Draw trend line across the full x-axis span
