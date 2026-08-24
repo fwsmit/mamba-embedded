@@ -36,10 +36,13 @@ from .plot_types.generic_scatter import create_generic_scatter_plot
 from .plot_types.accuracy import create_accuracy_comparison_bar_plot, create_accuracy_comparison_plot
 from .plot_types.accuracy_grid import create_accuracy_grid_plot
 from .plot_types.quantization_loss import create_quantization_loss_plot
+from .plot_types.val_test_gap import create_val_test_gap_plot
 from .plot_types.pareto_front import create_mcu_pareto_plot, create_pareto_front_plot
 from .plot_types.latency_correlation import create_latency_correlation_plot
 from .plot_types.param_accuracy import create_param_accuracy_plot
 from .plot_types.param_importance import create_param_importance_plot
+from .plot_types.val_contamination import create_har_val_contamination_plot
+from .plot_types.mambalite_lite import create_mambalite_lite_plot
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -139,7 +142,7 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss", "param_accuracy", "importance"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss", "val_test_gap", "param_accuracy", "importance", "val_contamination", "mambalite"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'accuracy_grid' (combined accuracy subplot grid sharing axes), "
@@ -149,7 +152,9 @@ def main():
              "'scatter' (generic scatter plot of two results.json fields), "
              "'profiling' (MCU operator profiling bar chart for a specific trial), "
              "'stacked' (MCU operator latency stacked by trial across all MCU-tested trials), "
-             "'quantization_loss' (quantization loss comparison across studies), or "
+             "'quantization_loss' (quantization loss comparison across studies), "
+             "'val_test_gap' (float validation-minus-test accuracy gap per experiment, "
+             "one beeswarm + box column per study), or "
              "'param_accuracy' (nr of parameters vs accuracy with N models selected from the Pareto front; "
              "for HAR studies, literature reference points are overlaid), or "
              "'importance' (two hyperparameter importance heatmaps — one per objective, "
@@ -183,9 +188,9 @@ def main():
     )
     parser.add_argument(
         "--ylim", nargs=2, type=float, default=None, metavar=("LOW", "HIGH"),
-        help="Fix the y-axis range (used with --plot quantization_loss). Pass "
-             "the same values to comparable plots (e.g. KWS and HAR) to keep "
-             "their y-axes consistent."
+        help="Fix the y-axis range (used with --plot quantization_loss and "
+             "--plot val_test_gap). Pass the same values to comparable plots "
+             "(e.g. KWS and HAR) to keep their y-axes consistent."
     )
     parser.add_argument(
         "--use-param-size", action="store_true",
@@ -379,6 +384,11 @@ def main():
         create_quantization_loss_plot(studies_data, title, ylim=args.ylim)
         plot_created = True
 
+    elif args.plot == "val_test_gap":
+        load_results_data(studies_data, repo_root)
+        create_val_test_gap_plot(studies_data, title, ylim=args.ylim)
+        plot_created = True
+
     elif args.plot == "param_accuracy":
         try:
             accuracy_field, selection_field, accuracy_label = resolve_accuracy(
@@ -413,6 +423,12 @@ def main():
         create_param_importance_plot(studies_data)
         plot_created = True
 
+    elif args.plot == "val_contamination":
+        # Per-subject contamination of the HAR validation split (reads the
+        # raw UCI HAR dataset directly; config path is used only for title).
+        create_har_val_contamination_plot(title)
+        plot_created = True
+
     elif args.plot == "stacked":
         # ── MCU operator latency stacked by trial across all MCU-tested trials ──
         if len(args.configs) != 1:
@@ -426,6 +442,13 @@ def main():
         if create_stacked_profiling_plot(study_name, args.configs[0], display_name,
                                          absolute=args.absolute):
             plot_created = True
+
+    elif args.plot == "mambalite":
+        # Compare this work's Mamba-Lite micro models (parsed directly from
+        # experiments/mambalite-micro/*.output) against the Mamba-Lite micro
+        # published reference. Configs are ignored here; only the title is reused.
+        create_mambalite_lite_plot(repo_root, title)
+        plot_created = True
 
     if not plot_created:
         print("\nNo plots created.")

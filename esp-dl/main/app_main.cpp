@@ -367,6 +367,16 @@ extern "C" void app_main(void) {
 #endif
 
   //
+  // Single-inference latency: feed the first dataset sample as input and
+  // report the average wall-clock time of 10 runs.
+  //
+  input_tensor->assign(input_shape, ds.data, input_exponent, input_dtype);
+  model->run(); // warm-up
+  float avg_us = run_and_time(model, 10);
+  ESP_LOGI(TAG, "Average single-inference latency: %.1f us (%.3f ms)", avg_us,
+           avg_us / 1000.0f);
+
+  //
   // Memory profiling (built-in) and latency profiling summary (grouped by op type)
   //
   model->profile_memory();

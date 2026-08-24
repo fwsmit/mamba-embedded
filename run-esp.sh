@@ -49,8 +49,14 @@ if [[ "$MODEL_BASENAME" =~ trial-([0-9]+)(_[A-Za-z0-9]+)?\.espdl$ ]]; then
   fi
   cp "$DATASET_SRC" "$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
 else
-  echo "Error: model filename does not contain a trial number (expected *-trial-N.espdl): $MODEL_BASENAME" >&2
-  exit 1
+  # Fallback for models without a trial number (e.g. the fixed Mamba-Lite
+  # micro models): look for dataset-<model-stem>.bin next to the model.
+  DATASET_SRC="$(dirname "$MODEL_PATH")/dataset-${MODEL_BASENAME%.espdl}.bin"
+  if [ ! -f "$DATASET_SRC" ]; then
+    echo "Error: dataset file not found: $DATASET_SRC" >&2
+    exit 1
+  fi
+  cp "$DATASET_SRC" "$SCRIPT_DIR/esp-dl/main/model/dataset.bin"
 fi
 
 cd "$SCRIPT_DIR/esp-dl"

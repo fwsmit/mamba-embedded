@@ -51,5 +51,5 @@ experiments/
 .zshrc
 home/
 experiments-backup-*/
-figures-backup/
+figures-backup*/
 mamba_hpo-backup-*.db

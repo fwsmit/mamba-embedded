@@ -120,6 +120,7 @@ def load_datasets(dataset: str, split: str = "train"):
 INPUT_SHAPE_MAP = {
     (1, 10, 57): "har",
     (1, 49, 40): "kws",
+    (1, 100, 40): "kws",
 }
 
 

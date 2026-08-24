@@ -45,6 +45,22 @@ conda run -n torch-pascal python -m train.quantize --model mamba-1 --dataset har
 
 Set `MODEL` (e.g., `mamba-1`, `mamba-3`) and `DATASET` (e.g., `har`, `kws`) as environment variables.
 
+### Mamba-Lite micro comparison models
+
+Train the 7 fixed-architecture Mamba-1 models used to compare latency with the
+Mamba-Lite micro paper. Each model is a `MambaWrapper` with every Mamba
+hyperparameter at its library default (d_state=16, d_conv=4, expand=2) and only
+`d_model=64` customised. Input shapes match the paper (KWS: 40 features × 100 frames,
+10 classes; HAR: 57 × 10, 6 classes).
+
+```bash
+conda run -n torch-pascal python -m train.train_lite [--epochs N] [--model NAME]
+```
+
+Exports the 7 ONNX models to `mambalite-micro/` in the repo root. When no CUDA
+device is available the CUDA-only Mamba kernels are patched out with CPU
+reference implementations so the models can be trained on CPU.
+
 ## Architecture Search
 
 Run an Optuna-based hyperparameter search with a pre-defined configuration using Hydra:
@@ -221,6 +237,8 @@ conda run -n torch-pascal python -m train.plot_arch_search --plot accuracy confi
 conda run -n torch-pascal python -m train.plot_arch_search --plot accuracy_grid config/kws/arch-mamba1-kws-2.yaml config/kws/arch-mamba1-kws-bidir.yaml config/kws/arch-mamba1-kws-bidir-mul.yaml config/har/arch-mamba1-har.yaml config/har/arch-mamba1-har-bidir.yaml config/har/arch-mamba1-har-bidir-mul.yaml
 conda run -n torch-pascal python -m train.plot_arch_search --plot mcu_pareto config/har/arch-mamba1-har.yaml
 conda run -n torch-pascal python -m train.plot_arch_search --plot mcu_pareto --size 8 --quantization tqt config/har/arch-mamba1-har.yaml
+conda run -n torch-pascal python -m train.plot_arch_search --plot mambalite --title "Mamba-Lite micro comparison" config/har/*
+conda run -n torch-pascal python -m train.plot_arch_search --plot val_test_gap --title "Float validation vs test accuracy gap" config/har/* config/kws/*
 ```
 
 Four plot types are available:
@@ -235,6 +253,9 @@ Four plot types are available:
 | `stacked` | Stacked bar chart of MCU operator latency across ALL MCU-tested trials (one bar per trial, segment per operator, sorted by total latency). Normalised to 100% by default; use `--absolute` for summed ms. Total latency annotated above each bar |
 | `importance` | Two heatmaps of hyperparameter importance (one per objective: Accuracy/Latency): rows are the studies, columns are the hyperparameters, cells coloured by importance with value labels. Importance values are computed with optuna's PedAnova evaluator on the raw objective value — the same computation as optuna-dashboard — so the numbers match the dashboard. (PedAnova measures importance for *low* target values, so the Accuracy heatmap shows which parameters drive accuracy *down*, e.g. lr causing diverged training.) Rows are ordered by dataset (HAR first) then architecture variant (single → bidir add → bidir mul); the 0–1 colour scale is shared across both heatmaps. Pass all configs at once (e.g. `config/har/* config/kws/*`) to get the full 6-study grid. |
 | `quantization_loss` | Paper-ready single panel comparing quantization loss per strategy (8-bit PTQ, 8-bit KL-TQT, 16-bit PTQ). Architecture variants (bidirectional add / mul / single direction) are pooled: each chart shows exactly one column per strategy (n=42 for HAR, n=30 for KWS), each with a light semi-transparent raw-point strip (colour + shape per strategy — circle/square/triangle survive grayscale printing) over a semi-transparent boxplot (its internal line marks the median); a black diamond marks the mean (value suffixed `*` when pulled by outliers), with its numeric label placed beside/above the box so it never collides with box edges. A symlog y-axis (logarithmic with a linear band near zero) keeps the dense near-zero bulk and large outliers readable, with plain round-number tick labels (e.g. 0, 5, 10, 20, 40, 80) instead of log-decade numbers, and a dashed zero line as the "no change" reference (points below = quantized model more accurate); a horizontal legend sits below the plot. The per-column n= count is merged into the x tick labels and a per-chart title ("HAR:"/"KWS: Quantization Loss by Strategy", inferred from the study title) identifies the dataset. Single-column figure size, exported at 300 DPI PNG plus PDF and SVG vectors. Pass `--ylim LOW HIGH` to fix the y-range (e.g. identical values for KWS and HAR) so companion figures share a consistent axis |
+| `val_test_gap` | Overfitting / val–test distribution-shift check for the **float** model: one beeswarm + box column per experiment (har-single, har-bidir-add, har-bidir-mul, kws-single, kws-bidir-add, kws-bidir-mul) of the validation-minus-test accuracy gap in percentage points (`float_accuracy - test_float_accuracy`), reusing the quantization-loss figure's raw-point strip + boxplot + mean-diamond styling (shared helpers in `plot_types/common.py`). Positive = validation accuracy above test accuracy; a dashed zero line is the "no gap" reference. Columns are ordered by dataset (HAR first) then variant (single → bidir add → bidir mul), coloured per dataset (blue = HAR, orange = KWS) with per-variant markers; the per-column n= count is merged into the x tick labels. Pass `config/har/* config/kws/*` for the full 6-experiment figure; `--ylim LOW HIGH` fixes the y-range. Exported at 300 DPI PNG plus PDF and SVG |
+| `val_contamination` | Bar chart of per-subject contamination of the HAR validation set. Each bar shows, for one of the 30 UCI subjects, the percentage of that subject's validation windows overlapped by a train window (adjacent same-subject windows sharing 50% raw data that were split across the random train/val boundary). It reproduces `load_har_data()`'s 80/20 seed-42 random split (torch. `random_split`) but reads the raw UCI HAR dataset directly; the config path is used only for the title. Only pairs that genuinely share identical raw readings (all 9 inertial axes) count — adjacent pairs at recording boundaries do not share data and are excluded — so contamination is never over-counted. Subjects held out to the UCI test partition (which have no validation windows) are drawn hatched at 0%, with a dashed dataset-mean reference line. Raster PNG at 300 DPI plus PDF |
+| `mambalite` | Bar charts comparing this work's Mamba-Lite micro models against the published Mamba-Lite micro reference, per dataset (HAR and KWS). Three metrics are compared, each as one bar chart per dataset: average single-inference latency (ms), peak memory usage (total KB; this work's bars are stacked and coloured by RAM kind — blue internal-RAM on the bottom, purple PSRAM on top — while the Mamba-Lite reference bar is a single internal-RAM bar since it uses only internal RAM) and flash model storage (bytes; converted from the KB flash total). Successful runs are parsed directly from `experiments/mambalite-micro/*.output` (a run counts if the log has an `INFERENCE_OK` line, a latency figure and the memory-summary total row); failed runs are skipped. The Mamba-Lite reference bar is hatched. Raster PNG at 300 DPI plus PDF |
 
 Pass `--bar` together with `--plot accuracy` to draw a grouped bar chart (one bar group per trial, one bar per quantization method) instead of the scatter plot. Without `--bar`, the accuracy plot is unchanged.
 

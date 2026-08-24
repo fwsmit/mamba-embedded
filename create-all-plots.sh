@@ -24,6 +24,9 @@ python -m train.plot_arch_search --plot scatter --x-field param_size_bytes --y-f
 python -m train.plot_arch_search --plot scatter --x-field nr_parameters --y-field test_quantized_accuracy --x-label "Parameters (K)" --y-label "8-bit quantized accuracy (%)" --title "Parameters vs accuracy (KWS)" config/kws/*
 python -m train.plot_arch_search --plot scatter --x-field nr_parameters --y-field test_quantized_accuracy --x-label "Parameters (K)" --y-label "8-bit quantized accuracy (%)" --title "Parameters vs accuracy (HAR)" config/har/*
 
+# Scatter: overfitting check (validation minus test accuracy vs trial number)
+python -m train.plot_arch_search --plot scatter --x-field trial_number --y-field val_test_float_gap --x-label "Trial number" --y-label "Validation minus test accuracy (percentage points)" --y-zero-line --title "Overfitting across HPO trials" config/kws/* config/har/*
+
 # Quantization loss
 python -m train.plot_arch_search --plot quantization_loss --title "Quantization loss per strategy (KWS)" config/kws/*
 python -m train.plot_arch_search --plot quantization_loss --title "Quantization loss per strategy (HAR)" config/har/*
@@ -58,6 +61,10 @@ python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mam
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (HAR)" config/har/*
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" config/kws/* config/kws-multi-layer/*
 
+# Per-subject contamination of the HAR validation split (reads the raw
+# UCI HAR dataset directly; config only resolves the title)
+python -m train.plot_arch_search --plot val_contamination --title "HAR validation contamination per subject" config/har/arch-mamba1-har.yaml
+
 # Compare parameter count with other studies
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/har/*
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
@@ -65,7 +72,15 @@ python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization t
 # Hyperparameter importance
 python -m train.plot_arch_search --plot importance config/har/* config/kws/*
 
+# Mamba-Lite micro comparison (latency / peak RAM / flash vs the paper's
+# reference; parsed from experiments/mambalite-micro/*.output)
+python -m train.plot_arch_search --plot mambalite --title "Mamba-Lite micro comparison" config/har/*
+
 # Overfitting test
+# Float validation minus test accuracy per experiment (overfitting /
+# val-test distribution shift check, one beeswarm + box column per study)
+python -m train.plot_arch_search --plot val_test_gap --title "Float validation vs test accuracy gap" config/har/* config/kws/*
+
 # python -m train.plot_arch_search --plot scatter \
 #   --x-field number --y-field val_test_float_gap \
 #   --x-label "Trial number" --y-label "Validation - test accuracy (pp, float32)" \
