@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "espdl-quantize": {
+      "source": "espressif/esp-dl",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/espdl-quantize/SKILL.md",
+      "computedHash": "fefdb3e05e83daa1a71fb260f9534e15dff95a09c39da57de24bc0f855f135bb"
+    }
+  }
+}
