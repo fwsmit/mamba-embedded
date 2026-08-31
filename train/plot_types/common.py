@@ -148,9 +148,11 @@ def pt_to_data(ax, fig, pt):
     return pt / 72.0 * fig.dpi / px_per_unit
 
 
-def beeswarm_box(ax, fig, x, values, color, marker, box_width=BOX_WIDTH):
+def beeswarm_box(ax, fig, x, values, color, marker, box_width=BOX_WIDTH,
+                show_mean=True):
     """Draw one column of light raw points + boxplot + black mean diamond with
-    a numeric label. Returns (mean, median, q1, q3, label)."""
+    a numeric label. Returns (mean, median, q1, q3, label). Pass show_mean=False
+    to skip the mean diamond and its label."""
     values = np.asarray(values, dtype=float)
     offs = beeswarm_offsets(values)
     ax.scatter(x + offs, values, s=16, alpha=0.5, color=color, marker=marker,
@@ -165,19 +167,21 @@ def beeswarm_box(ax, fig, x, values, color, marker, box_width=BOX_WIDTH):
     mean = float(np.mean(values))
     med = float(np.median(values))
     q1, q3 = np.percentile(values, [25, 75])
-    outlier = abs(mean - med) > 1.5 * (q3 - q1) + 1e-9
-    ax.scatter([x], [mean], s=30, marker="D", color="black", zorder=4)
-    label = f"{mean:.2f}{'*' if outlier else ''}"
-    bbox = dict(facecolor="white", alpha=0.85, edgecolor="none", pad=1)
-    # Mean label: to the right of the diamond by default; if that fixed
-    # offset would land on the box edge (narrow columns), nudge vertically
-    # (above the box) instead so it never collides with the box.
-    if x + pt_to_data(ax, fig, 6.0) < x + box_width / 2:
-        ax.annotate(label, (x, mean), textcoords="offset points",
-                    xytext=(0, 5), ha="center", va="bottom",
-                    fontsize=8, zorder=6, color="black", bbox=bbox)
-    else:
-        ax.annotate(label, (x, mean), textcoords="offset points",
-                    xytext=(6, 0), ha="left", va="center",
-                    fontsize=8, zorder=6, color="black", bbox=bbox)
+    label = None
+    if show_mean:
+        outlier = abs(mean - med) > 1.5 * (q3 - q1) + 1e-9
+        ax.scatter([x], [mean], s=30, marker="D", color="black", zorder=4)
+        label = f"{mean:.2f}{'*' if outlier else ''}"
+        bbox = dict(facecolor="white", alpha=0.85, edgecolor="none", pad=1)
+        # Mean label: to the right of the diamond by default; if that fixed
+        # offset would land on the box edge (narrow columns), nudge vertically
+        # (above the box) instead so it never collides with the box.
+        if x + pt_to_data(ax, fig, 6.0) < x + box_width / 2:
+            ax.annotate(label, (x, mean), textcoords="offset points",
+                        xytext=(0, 5), ha="center", va="bottom",
+                        fontsize=8, zorder=6, color="black", bbox=bbox)
+        else:
+            ax.annotate(label, (x, mean), textcoords="offset points",
+                        xytext=(6, 0), ha="left", va="center",
+                        fontsize=8, zorder=6, color="black", bbox=bbox)
     return mean, med, q1, q3, label

@@ -39,8 +39,12 @@ LAT_RE   = re.compile(r"Average single-inference latency:\s*([\d.]+)\s*us")
 TOTAL_RE = re.compile(r"\|\s*total\s*\|\s*([\d.]+)KB\s*\|\s*([\d.]+)KB\s*\|\s*([\d.]+)KB\s*\|")
 
 # Architecture / quantization display labels and ordering (for tidy bars).
+# "single" is this work's own single-direction model, shown as "our" on the
+# axis; the published reference is a float32 model, shown as Mamba-Lite-Micro.
 ARCH_ORDER   = ["single", "bidir", "bidir-add", "bidir-mul"]
 QUANT_ORDER  = ["int8", "int8-TQT", "int16", "float"]
+ARCH_DISPLAY = {"single": "our", "bidir": "our"}
+REF_LABEL    = "MambaLite-Micro\n(float32)"
 
 # Mamba-Lite micro published reference values, per dataset: latency (ms),
 # peak RAM (KB, total) and flash storage (bytes), as quoted in the brief.
@@ -94,12 +98,17 @@ def _merge_bars(entries):
         prev = next((o for o in out
                      if o["arch"] == arch and o["quant"] == e["quant"]), None)
         if prev is None:
-            e["model"] = f"{arch} ({e['quant']})"
+            e["model"] = f"{_display_arch(arch)} ({e['quant']})"
             out.append(e)
         else:
             prev["value"] = (prev["value"] + e["value"]) / 2.0
     out.sort(key=_sort_key)
     return out
+
+
+def _display_arch(arch):
+    """Architecture name as shown on the axis (e.g. 'single' -> 'our')."""
+    return ARCH_DISPLAY.get(arch, arch)
 
 
 def _load_runs(repo_root):
@@ -135,7 +144,7 @@ def _load_runs(repo_root):
         internal, psram, flash = (float(tot_m.group(1)), float(tot_m.group(2)),
                                   float(tot_m.group(3)))
         runs[dataset].append({
-            "arch": arch, "quant": quant, "model": f"{arch} ({quant})",
+            "arch": arch, "quant": quant, "model": f"{_display_arch(arch)} ({quant})",
             "latency_ms": float(lat_m.group(1)) * 1e-3,
             "internal_ram_kb": internal,
             "psram_kb": psram,
@@ -151,26 +160,75 @@ def _load_runs(repo_root):
     return runs
 
 
-def _draw_bars(models, ref_value, ylabel, ytitle, filename, colors=None):
-    """One plain bar chart: this work's model bars plus the reference bar."""
-    labels = [m["model"] for m in models] + ["Mamba-Lite micro"]
-    values = [m["value"] for m in models] + [ref_value]
+GROUP_GAP = 0.75  # extra spacing between label groups (in bar-spacing units)
+
+
+def _bar_positions(n, gap_before):
+    """Bar centers for n bars; insert a wider gap before the given index so
+    the two label groups read as visually separated clusters."""
+    if gap_before is None:
+        return list(range(n))
+    return [i + (GROUP_GAP if i >= gap_before else 0.0) for i in range(n)]
+
+
+def _tick_rotation(labels):
+    """Rotate x tick labels when they do not fit between adjacent bars: with
+    more than 5 bars, or with a single line longer than the bar spacing
+    permits (e.g. a long one-line 'Mamba-Lite-Micro (float32)')."""
+    if len(labels) > 5:
+        return 45
+    longest_line = max(len(line) for l in labels for line in l.split("\n"))
+    if len(labels) > 1 and longest_line >= 20:
+        return 45
+    return 0
+
+
+def _draw_bars(models, ref_value, ylabel, ytitle, filename, colors=None,
+               ref_position=None, groups=None, gap_before=None):
+    """One plain bar chart: this work's model bars plus the reference bar.
+
+    ref_position: 0-based index at which the reference bar is inserted
+    (default: after all model bars, e.g. to group the single-directional
+    Mamba-Lite reference with this work's single-direction models).
+    groups: list of (start, end, label) tuples; each draws centred text below
+    the x tick labels spanning bars start..end (inclusive), e.g. to label
+    the single-direction vs bidirectional groups.
+    gap_before: 0-based index before which extra spacing is inserted, so the
+    two label groups read as visually separated bar clusters.
+    """
+    labels = [m["model"] for m in models]
+    values = [m["value"] for m in models]
     if colors is None:
-        colors = [MODEL_COLOR] * len(models) + [REF_COLOR]
-    hatch = [None] * len(models) + ["//"]   # distinguish the reference in B/W
+        colors = [MODEL_COLOR] * len(models)
+    colors = list(colors)
+    hatch = [None] * len(models)
+    if ref_position is None:
+        ref_position = len(models)
+    labels.insert(ref_position, REF_LABEL)
+    values.insert(ref_position, ref_value)
+    colors.insert(ref_position, REF_COLOR)
+    hatch.insert(ref_position, "//")   # distinguish the reference in B/W
 
     n = len(values)
+    positions = _bar_positions(n, gap_before)
+    rotation = _tick_rotation(labels)
     fig, ax = plt.subplots(figsize=(max(6.5, 0.5 * n), 6))
-    ax.bar(np.arange(n), values, color=colors, edgecolor="white", linewidth=0.5,
+    ax.bar(positions, values, color=colors, edgecolor="white", linewidth=0.5,
            hatch=hatch, width=0.8)
-    ax.set_xticks(np.arange(n))
-    ax.set_xticklabels(labels, rotation=45 if n > 5 else 0, ha="center" if n <= 5 else "right", fontsize=9)
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels, rotation=rotation,
+                       ha="right" if rotation else "center", fontsize=9)
     ax.set_ylabel(ylabel, fontsize=11)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
+    group_y = -0.24 if rotation else -0.13
+    for start, end, label in groups or []:
+        ax.text((positions[start] + positions[end]) / 2.0, group_y, label,
+                transform=ax.get_xaxis_transform(), ha="center", va="top",
+                fontsize=9)
     ax.legend(handles=[
         Patch(facecolor=MODEL_COLOR, edgecolor="white", label="This work (Mamba)"),
         Patch(facecolor=REF_COLOR, hatch="//", edgecolor="white",
-              label="Mamba-Lite micro"),
+              label=REF_LABEL),
     ], fontsize=9, framealpha=1.0)
     savefig(fig, ytitle, f"mambalite_{filename}", dpi=300)
 
@@ -178,7 +236,7 @@ def _draw_bars(models, ref_value, ylabel, ytitle, filename, colors=None):
 def _draw_stacked_ram(models, dataset, ytitle):
     """Peak-memory bars stacked by RAM kind: each model's internal-RAM and PSRAM
     parts are stacked and coloured separately. The reference bar is hatched."""
-    labels = [m["model"] for m in models] + ["Mamba-Lite micro"]
+    labels = [m["model"] for m in models] + [REF_LABEL]
     n = len(labels)
     fig, ax = plt.subplots(figsize=(max(6.5, 0.5 * n), 6))
     x = np.arange(n)
@@ -198,14 +256,16 @@ def _draw_stacked_ram(models, dataset, ytitle):
            edgecolor="white", linewidth=0.5, width=0.8, hatch="//")
 
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=45 if n > 5 else 0, ha="center" if n <= 5 else "right", fontsize=9)
+    rotation = _tick_rotation(labels)
+    ax.set_xticklabels(labels, rotation=rotation,
+                       ha="right" if rotation else "center", fontsize=9)
     ax.set_ylabel("Peak RAM (KB)", fontsize=11)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
     handles = [
         Patch(facecolor=INTERNAL_RAM_COLOR, edgecolor="white", label="Internal RAM"),
         Patch(facecolor=PSRAM_COLOR, edgecolor="white", label="PSRAM"),
         Patch(facecolor=INTERNAL_RAM_COLOR, hatch="//", edgecolor="white",
-              label="Mamba-Lite micro"),
+              label=REF_LABEL),
     ]
     ax.legend(handles=handles, fontsize=9, framealpha=1.0)
     savefig(fig, ytitle, f"mambalite_peakram_{dataset}", dpi=300)
@@ -228,12 +288,24 @@ def create_mambalite_lite_plot(repo_root, title=None):
         else:
             any_models = True
 
-        # Latency (quantization levels and bidir variants averaged per bar)
+        # Latency (quantization levels and bidir variants averaged per bar).
+        # The Mamba-Lite reference is single-directional, so it is inserted
+        # right after this work's single-direction bars (3rd position) and the
+        # two groups are labelled below the axis.
+        merged = _merge_bars([dict(m, value=m["latency_ms"]) for m in models])
+        n_single = sum(1 for m in merged if m["arch"] == "single")
+        groups = None
+        if merged and n_single < len(merged):
+            groups = [
+                (0, n_single, "single direction"),
+                (n_single + 1, len(merged), "bidirectional"),
+            ]
         _draw_bars(
-            _merge_bars([dict(m, value=m["latency_ms"]) for m in models]),
-            ref["latency_ms"],
+            merged, ref["latency_ms"],
             "Latency (ms)", f"Latency vs Mamba-Lite micro ({dl})",
-            f"latency_{dataset}")
+            f"latency_{dataset}",
+            ref_position=n_single if merged else None, groups=groups,
+            gap_before=(n_single + 1) if groups else None)
         # Peak memory = internal RAM + PSRAM (stacked, coloured by RAM kind)
         _draw_stacked_ram(models, dataset, f"Peak memory vs Mamba-Lite micro ({dl})")
         # Flash storage in bytes

@@ -27,9 +27,10 @@ python -m train.plot_arch_search --plot scatter --x-field nr_parameters --y-fiel
 # Scatter: overfitting check (validation minus test accuracy vs trial number)
 python -m train.plot_arch_search --plot scatter --x-field trial_number --y-field val_test_float_gap --x-label "Trial number" --y-label "Validation minus test accuracy (percentage points)" --y-zero-line --title "Overfitting across HPO trials" config/kws/* config/har/*
 
-# Quantization loss
-python -m train.plot_arch_search --plot quantization_loss --title "Quantization loss per strategy (KWS)" config/kws/*
-python -m train.plot_arch_search --plot quantization_loss --title "Quantization loss per strategy (HAR)" config/har/*
+# Quantization loss (shared y-limits keep the zero line at the same height
+# across both plots; negative LOW keeps zero-loss-improved trials visible)
+python -m train.plot_arch_search --plot quantization_loss --ylim -1 100 --title "Quantization loss per strategy (KWS)" config/kws/*
+python -m train.plot_arch_search --plot quantization_loss --ylim -1 100 --title "Quantization loss per strategy (HAR)" config/har/*
 
 # Profiling plot
 python -m train.plot_arch_search --plot profiling --trial 18 config/har/arch-mamba1-har-bidir-mul.yaml

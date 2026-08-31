@@ -101,8 +101,11 @@ quantization_methods: [standard]  # optional; PTQ methods to compare in top_mode
                                     # TQT_FINAL_REPORT.md). Each method is stored under
                                     # its own suffixed results keys (e.g. *_strat). If TQT
                                     # diverges (NaN/Inf scales, e.g. on some bidirectional
-                                    # models), it automatically falls back to
-                                    # calibration-only PTQ so the pipeline still completes.
+                                    # models), the trial's *_strat accuracy is recorded as 0
+                                    # in results.json (no .espdl/.info is produced) and the
+                                    # pipeline still completes. The quantization_loss plot
+                                    # does not filter these out: each such trial appears as
+                                    # a legitimate large positive loss outlier (test_float_accuracy - 0).
 plot_description: "Mamba-1 baseline"  # optional; label used in Pareto front plots
 
 SEARCH_SPACE:

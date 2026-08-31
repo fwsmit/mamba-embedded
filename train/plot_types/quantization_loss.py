@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
 
 from .common import savefig, beeswarm_box, LINTHRESH
@@ -61,7 +60,7 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     # ── Raw points (light texture), box, mean diamond per strategy ──────────
     for si in present:
         beeswarm_box(ax, fig, xs[si], strategy_losses[si],
-                     STRATEGIES[si][2], STRATEGIES[si][3])
+                     STRATEGIES[si][2], STRATEGIES[si][3], show_mean=False)
 
     ax.set_yscale("symlog", linthresh=LINTHRESH, linscale=0.5)
     if ylim is not None:
@@ -72,8 +71,7 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     ax.axhline(0, color="#7F7F7F", linestyle="--", linewidth=0.8, zorder=3)
 
     # ── Axes / labels ───────────────────────────────────────────────────────
-    tick_labels = [f"{STRATEGIES[si][0]}\n(n={len(strategy_losses[si])})"
-                   for si in present]
+    tick_labels = [f"{STRATEGIES[si][0]}" for si in present]
     ax.set_xticks([xs[si] for si in present])
     ax.set_xticklabels(tick_labels, fontsize=8)
     ax.set_ylabel("Quantization Loss (%pt)", fontsize=9)
@@ -86,12 +84,5 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
     ax.tick_params(axis="both", labelsize=8)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
-
-    # ── Legend: one entry per strategy, laid out horizontally below the plot.
-    handles = [Line2D([0], [0], marker=STRATEGIES[si][3], color="w",
-                      markerfacecolor=STRATEGIES[si][2], markersize=6,
-                      label=STRATEGIES[si][0]) for si in present]
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.32),
-              ncol=len(present), frameon=False, fontsize=8, handlelength=2)
 
     savefig(fig, title, "quant_loss", dpi=300, svg=True)
