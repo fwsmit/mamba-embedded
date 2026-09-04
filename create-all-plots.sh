@@ -35,6 +35,10 @@ python -m train.plot_arch_search --plot quantization_loss --ylim -1 100 --title 
 # Profiling plot
 python -m train.plot_arch_search --plot profiling --trial 18 config/har/arch-mamba1-har-bidir-mul.yaml
 
+# Confusion matrix of a specific trial's MCU predictions (validation set)
+python -m train.plot_arch_search --plot confusion --trial 18 config/har/arch-mamba1-har-bidir-mul.yaml
+python -m train.plot_arch_search --plot confusion --trial 8 config/kws/arch-mamba1-kws-bidir.yaml
+
 # python -m train.plot_arch_search --plot latency config/kws/* --title "PC latency vs MCU latency (KWS)"
 # python -m train.plot_arch_search --plot latency config/har/* --title "PC latency vs MCU latency (HAR)"
 python -m train.plot_arch_search --plot latency config/kws/arch-mamba1-kws-2.yaml
@@ -68,10 +72,11 @@ python -m train.plot_arch_search --plot val_contamination --title "HAR validatio
 
 # Compare parameter count with other studies
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/har/*
-python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
+# python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
+python -m train.plot_arch_search --plot param_accuracy --size 16 --quantization percent --n-models 5 --min-val-acc 85 config/kws/*
 
 # Hyperparameter importance
-python -m train.plot_arch_search --plot importance config/har/* config/kws/*
+python -m train.plot_arch_search --plot importance config/har/* config/kws/* config/kws-multi-layer/*
 
 # Mamba-Lite micro comparison (latency / peak RAM / flash vs the paper's
 # reference; parsed from experiments/mambalite-micro/*.output)

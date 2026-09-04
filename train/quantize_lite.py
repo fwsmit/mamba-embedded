@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """
 Quantize the 7 fixed-architecture Mamba-Lite micro comparison models
-(mambalite-micro/*.onnx) with every supported ESP-DL quantization method:
+(mambalite-micro/*.onnx) with the ESP-DL PTQ quantization methods:
 
     standard    8-bit PTQ (32 uniform-random calibration samples)
-    strat-kl-tqt  8-bit PTQ with KL calibration over 256 stratified samples
-                 followed by a graph-wide TQT pass (best 8-bit config)
     int16      16-bit PTQ
 
-and additionally export the unquantized FP32 model (if possible), so the
-models can also be run on the ESP32-S3 as a float baseline.
-
-For every variation a quantized dataset binary is written next to the .espdl
+For every method a quantized dataset binary is written next to the .espdl
 file (named dataset-<model><suffix>.bin) so run-esp.sh can flash it to the
 ESP32-S3. All artefacts land in experiments/mambalite-micro/ and every
 quantization attempt (including failures) is recorded in
@@ -32,10 +27,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 from .quantize import (
-    BEST_CALIB_STEPS,
     CALIB_BATCH,
     CALIB_STEPS,
     TARGET,
@@ -45,10 +38,8 @@ from .quantize import (
     get_input_quantization,
     infer_input_shape,
     load_calibration,
-    load_calibration_stratified,
     quantize_dataset_to_bin,
     quantize_onnx_to_espdl,
-    quantize_onnx_to_espdl_best,
 )
 from .train_lite import _load_lite_data
 
@@ -70,7 +61,6 @@ MODEL_DATASETS = {
 # (method name, quantize fn, calibration kind, calib steps, bits, filename suffix)
 METHODS = [
     ("standard", quantize_onnx_to_espdl, "uniform", CALIB_STEPS, 8, ""),
-    ("strat-kl-tqt", quantize_onnx_to_espdl_best, "stratified", BEST_CALIB_STEPS, 8, "_strat"),
     ("int16", quantize_onnx_to_espdl, "uniform", CALIB_STEPS, 16, "_int16"),
 ]
 
@@ -116,12 +106,8 @@ def _patch_esp_ppq_input_limit():
 _patch_esp_ppq_input_limit()
 
 
-def build_calib_loader(dataset, train_lite, kind: str):
+def build_calib_loader(dataset, train_lite):
     """Calibration loader for a method, derived from the shared lite train set."""
-    if kind == "stratified":
-        return load_calibration_stratified(
-            dataset, REPO_ROOT, n_samples=BEST_CALIB_STEPS, train_ds=train_lite
-        )
     return load_calibration(
         dataset, REPO_ROOT, CALIB_STEPS * CALIB_BATCH, train_ds=train_lite
     )
@@ -176,67 +162,10 @@ def write_dataset_bin(configs, dataset, output_path, num_of_bits):
         quantize_dataset_to_bin(configs, dataset, output_path)
 
 
-def export_float_dataset_to_bin(dataset, output_path):
-    """Write a dataset as raw float32 (for the unquantized FP32 models).
-
-    Layout matches quantize_dataset_to_bin: uint32 num_samples, uint32
-    elements_per_sample, then float32 samples flattened row-major.
-    """
-    all_flat = []
-    elements_per_sample = None
-    for features, _label in dataset:
-        if features.dim() == 2:
-            x = features.unsqueeze(0)
-        else:
-            x = features
-        flat = x.float().flatten()
-        if elements_per_sample is None:
-            elements_per_sample = flat.numel()
-        all_flat.append(flat)
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "wb") as f:
-        f.write(struct.pack("<I", len(all_flat)))
-        f.write(struct.pack("<I", elements_per_sample))
-        for q in all_flat:
-            f.write(q.numpy().astype(np.float32).tobytes())
-    size_kb = output_path.stat().st_size / 1024
-    print(f"  Wrote {len(all_flat)} samples x {elements_per_sample} float32 -> {output_path} ({size_kb:.1f} KB)")
-
-
-def quantize_float(onnx_copy, espdl_path, input_shape):
-    """Export an unquantized FP32 .espdl model (via esp_ppq's FP32 branch)."""
-    from esp_ppq.api import espdl_quantize_onnx
-
-    ds = torch.utils.data.TensorDataset(
-        torch.zeros(1, *input_shape[1:]), torch.zeros(1, dtype=torch.long)
-    )
-    loader = DataLoader(ds, batch_size=1, shuffle=False)
-
-    espdl_quantize_onnx(
-        onnx_import_file=str(onnx_copy),
-        espdl_export_file=str(espdl_path),
-        calib_dataloader=loader,
-        calib_steps=1,
-        input_shape=input_shape,
-        target=TARGET,
-        num_of_bits=8,
-        float=True,
-        device=DEVICE,
-        collate_fn=collate_fn,
-        export_test_values=False,
-        error_report=False,
-        skip_export=False,
-    )
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="*", default=None,
                         help="Only quantize these model names (default: all 7)")
-    parser.add_argument("--skip-float", action="store_true",
-                        help="Skip the unquantized FP32 export")
     parser.add_argument("--out", type=Path, default=EXPERIMENTS,
                         help="Output directory (default: experiments/mambalite-micro)")
     args = parser.parse_args()
@@ -281,7 +210,7 @@ def main():
             print(f"  [{method_name}] quantizing ...", flush=True)
             t0 = time.time()
             try:
-                calib = build_calib_loader(dataset, train_lite, calib_kind)
+                calib = build_calib_loader(dataset, train_lite)
                 quant_graph = quantize_fn(
                     onnx_path=onnx_copy,
                     espdl_path=espdl_path,
@@ -318,32 +247,6 @@ def main():
                 }
                 print(f"  [{method_name}] FAILED: {type(e).__name__}: {e}", flush=True)
             manifest_path.write_text(json.dumps(manifest, indent=2))
-
-        if not args.skip_float:
-            espdl_path = out_dir / f"{name}_float.espdl"
-            if model_entry.get("float", {}).get("status") == "ok" and espdl_path.exists():
-                print("  [float] already exported, skipping", flush=True)
-            else:
-                print("  [float] exporting unquantized FP32 ...", flush=True)
-                t0 = time.time()
-                try:
-                    quantize_float(onnx_copy, espdl_path, input_shape)
-                    export_float_dataset_to_bin(val_lite, out_dir / f"dataset-{name}_float.bin")
-                    model_entry["float"] = {
-                        "status": "ok",
-                        "seconds": round(time.time() - t0, 1),
-                        "espdl_bytes": espdl_path.stat().st_size,
-                        "param_bytes": get_espdl_param_size(espdl_path.with_suffix(".info")),
-                    }
-                    print(f"  [float] OK ({model_entry['float']['seconds']}s, "
-                          f"{espdl_path.stat().st_size} bytes)", flush=True)
-                except Exception as e:  # noqa: BLE001
-                    model_entry["float"] = {
-                        "status": "failed", "error": f"{type(e).__name__}: {e}",
-                        "seconds": round(time.time() - t0, 1),
-                    }
-                    print(f"  [float] FAILED: {type(e).__name__}: {e}", flush=True)
-                manifest_path.write_text(json.dumps(manifest, indent=2))
 
     print(f"\nQuantization finished. Manifest: {manifest_path}")
     print(f"Outputs: {out_dir}")

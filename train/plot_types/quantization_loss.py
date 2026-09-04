@@ -55,12 +55,13 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
 
     xs = {si: i for i, si in enumerate(present)}  # x centre per strategy
 
-    fig, ax = plt.subplots(figsize=(3.6, 3.3))
+    fig, ax = plt.subplots(figsize=(4.4, 3.8))
 
     # ── Raw points (light texture), box, mean diamond per strategy ──────────
     for si in present:
         beeswarm_box(ax, fig, xs[si], strategy_losses[si],
-                     STRATEGIES[si][2], STRATEGIES[si][3], show_mean=False)
+                     STRATEGIES[si][2], STRATEGIES[si][3], show_mean=False,
+                     fontsize=11)
 
     ax.set_yscale("symlog", linthresh=LINTHRESH, linscale=0.5)
     if ylim is not None:
@@ -73,8 +74,8 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     # ── Axes / labels ───────────────────────────────────────────────────────
     tick_labels = [f"{STRATEGIES[si][0]}" for si in present]
     ax.set_xticks([xs[si] for si in present])
-    ax.set_xticklabels(tick_labels, fontsize=8)
-    ax.set_ylabel("Quantization Loss (%pt)", fontsize=9)
+    ax.set_xticklabels(tick_labels, fontsize=11)
+    ax.set_ylabel("Quantization Loss (%pt, log)", fontsize=12)
     # Symlog would default to log-decade labels (10^0, 10^1 …); show plain
     # round numbers instead, limited to the visible range so no tick is clipped.
     vmax = ylim[1] if ylim is not None else ax.get_ylim()[1]
@@ -82,7 +83,7 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     # Override the symlog formatter, which would otherwise blank out ticks
     # that are not exact powers of ten.
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
-    ax.tick_params(axis="both", labelsize=8)
+    ax.tick_params(axis="both", labelsize=11)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
     savefig(fig, title, "quant_loss", dpi=300, svg=True)

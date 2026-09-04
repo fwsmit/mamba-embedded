@@ -12,6 +12,7 @@ Usage:
   python plot_arch_search.py --plot latency config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot mcu_pareto --size 8 --quantization tqt config/arch-mamba1-har.yaml
   python plot_arch_search.py --plot importance config/har/* config/kws/*
+  python plot_arch_search.py --plot confusion --trial 8 config/kws/arch-mamba1-kws-bidir.yaml
 """
 
 import argparse
@@ -43,6 +44,7 @@ from .plot_types.param_accuracy import create_param_accuracy_plot
 from .plot_types.param_importance import create_param_importance_plot
 from .plot_types.val_contamination import create_har_val_contamination_plot
 from .plot_types.mambalite_lite import create_mambalite_lite_plot
+from .plot_types.confusion_matrix import create_confusion_matrix_plot
 
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -130,7 +132,8 @@ def load_study_meta(config_path: str) -> dict:
     cfg = OmegaConf.load(config_path)
     study_name = study_name_from_config(config_path)
     display_name = cfg.get("plot_description") or study_name
-    return {"study_name": study_name, "display_name": display_name}
+    return {"study_name": study_name, "display_name": display_name,
+            "dataset": str(cfg.DATASET)}
 
 
 def main():
@@ -142,7 +145,7 @@ def main():
         help="Paths to Hydra config YAML files (at least 1, up to any number)"
     )
     parser.add_argument(
-        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss", "val_test_gap", "param_accuracy", "importance", "val_contamination", "mambalite"], required=True,
+        "--plot", "-p", choices=["pareto", "accuracy", "accuracy_grid", "mcu_pareto", "latency", "scatter", "profiling", "stacked", "quantization_loss", "val_test_gap", "param_accuracy", "importance", "val_contamination", "mambalite", "confusion"], required=True,
         help="Which plot to create: 'pareto' (Pareto front comparison), "
              "'accuracy' (float vs quantized accuracy per study), "
              "'accuracy_grid' (combined accuracy subplot grid sharing axes), "
@@ -151,6 +154,8 @@ def main():
              "'latency' (PC latency vs MCU latency scatter plot), "
              "'scatter' (generic scatter plot of two results.json fields), "
              "'profiling' (MCU operator profiling bar chart for a specific trial), "
+             "'confusion' (confusion matrix of the MCU predictions of a specific trial "
+             "against the validation ground truth), "
              "'stacked' (MCU operator latency stacked by trial across all MCU-tested trials), "
              "'quantization_loss' (quantization loss comparison across studies), "
              "'val_test_gap' (float validation-minus-test accuracy gap per experiment, "
@@ -177,7 +182,7 @@ def main():
     )
     parser.add_argument(
         "--trial", type=int, default=None,
-        help="Trial number for the 'profiling' plot."
+        help="Trial number for the 'profiling' and 'confusion' plots."
     )
     parser.add_argument("--absolute", action="store_true", default=False,
                         help="For --plot stacked: plot summed latency (ms) instead of normalised %%.")
@@ -292,6 +297,7 @@ def main():
         studies_data.append({
             "name": display_name,
             "study_name": name,
+            "dataset": meta["dataset"],
             "study": study,
             "df": df,
             "par": par,
@@ -417,6 +423,22 @@ def main():
         print(f"  Profiling trial {args.trial} from study {study_name}")
 
         if create_profiling_plot(study_name, args.configs[0], args.trial, display_name):
+            plot_created = True
+
+    elif args.plot == "confusion":
+        # ── Confusion matrix of a specific trial's MCU predictions ─────────
+        if args.trial is None:
+            parser.error("--trial is required when using --plot confusion")
+        if len(args.configs) != 1:
+            parser.error("confusion plot requires exactly one config file.")
+
+        meta = load_study_meta(args.configs[0])
+        study_name = meta["study_name"]
+        display_name = meta["display_name"]
+        title = args.title or f"{display_name} (trial {args.trial})"
+        print(f"  Confusion matrix for trial {args.trial} from study {study_name}")
+
+        if create_confusion_matrix_plot(study_name, args.trial, title):
             plot_created = True
 
     elif args.plot == "importance":

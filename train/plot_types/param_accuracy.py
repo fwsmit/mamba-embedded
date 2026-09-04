@@ -88,6 +88,8 @@ HAR_LITERATURE_POINTS = [
 # is noted on their annotations.  `cost` carries each TinySpeech model's
 # compute in millions of Mult-Adds.
 KWS_LITERATURE_POINTS = [
+    dict(name="MambaLite-Micro", params=35978, value=92.5, metric="accuracy",
+         source="MambaLite-Micro", cost=1133.6, cost_unit="ms"),
     dict(name="TinySpeech-X", params=10800, value=94.6, metric="accuracy",
          source="arXiv:2008.04245", cost=10.9, cost_unit="Mult-Adds"),
     dict(name="TinySpeech-Y", params=6100, value=93.6, metric="accuracy",
@@ -116,6 +118,18 @@ KWS_LITERATURE_POINTS = [
          source="InterSpeech 2019", cost=143.2, cost_unit="Mult-Adds"),
     dict(name="TENet-6-narrow", params=17000, value=96.0, metric="accuracy",
          source="Interspeech 2020", cost=0.553, cost_unit="Mult-Adds"),
+    dict(name="TKWS-3", params=14400, value=92.4, metric="accuracy",
+         source="bartoliEndtoEndEfficiencyKeyword2025"),
+    dict(name="TKWS-2", params=4600, value=88.8, metric="accuracy",
+         source="bartoliEndtoEndEfficiencyKeyword2025"),
+    dict(name="TENet6-N", params=17100, value=91.8, metric="accuracy",
+         source="bartoliEndtoEndEfficiencyKeyword2025"),
+    dict(name="TENet6", params=54200, value=92.9, metric="accuracy",
+         source="bartoliEndtoEndEfficiencyKeyword2025"),
+    dict(name="LicoNet-S", params=17400, value=93.6, metric="accuracy",
+         source="bartoliEndtoEndEfficiencyKeyword2025"),
+    dict(name="DS-CNN", params=46500, value=91.2, metric="accuracy",
+         source="bartoliEndtoEndEfficiencyKeyword2025"),
 ]
 
 

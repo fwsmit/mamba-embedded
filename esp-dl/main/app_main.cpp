@@ -1,4 +1,5 @@
 #include "dl_model_base.hpp"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_partition.h"
 #include "esp_task_wdt.h"
@@ -28,12 +29,22 @@ static dl::Model *load_model(void) {
                               (size_t)(model_espdl_end - model_espdl_start));
   ESP_LOGI(TAG, "Model loaded");
 
-  esp_err_t test_err = model->test();
-  if (test_err != ESP_OK) {
-    ESP_LOGW(TAG, "Model test failed with error 0x%x: %s", test_err,
-             esp_err_to_name(test_err));
+  // model->test() only validates quantized models: it relies on test outputs
+  // exported by esp-ppq, which float models do not contain (get_test_outputs_name
+  // asserts on an empty vector). Skip it when the input tensor is float.
+  auto &inputs = model->get_inputs();
+  bool is_float =
+      inputs.empty() || inputs.begin()->second->get_dtype() == dl::DATA_TYPE_FLOAT;
+  if (is_float) {
+    ESP_LOGI(TAG, "Float model detected, skipping model test");
+  } else {
+    esp_err_t test_err = model->test();
+    if (test_err != ESP_OK) {
+      ESP_LOGW(TAG, "Model test failed with error 0x%x: %s", test_err,
+               esp_err_to_name(test_err));
+    }
+    ESP_LOGI(TAG, "Model tested");
   }
-  ESP_LOGI(TAG, "Model tested");
 
   return model;
 }
@@ -325,7 +336,11 @@ extern "C" void app_main(void) {
   auto &graph_outputs = model->get_outputs();
 
   if (graph_inputs.empty() || graph_outputs.empty()) {
-    ESP_LOGE(TAG, "Model has no inputs or outputs");
+    // Model::build() populates inputs/outputs but is skipped when load() failed
+    // (see the "dl::Model: Do not support ..." error above). Float models hit
+    // this because ESP-DL has no float32 MatMul/Conv/Gemm kernels.
+    ESP_LOGE(TAG, "Model failed to load: no inputs or outputs registered");
+    printf("INFERENCE_FAIL\n");
     cleanup_model(model);
     return;
   }
@@ -350,6 +365,7 @@ extern "C" void app_main(void) {
   Dataset ds;
   if (!load_dataset(&ds) || ds.num_samples == 0) {
     ESP_LOGE(TAG, "No dataset available");
+    printf("INFERENCE_FAIL\n");
     cleanup_model(model);
     return;
   }
@@ -371,6 +387,17 @@ extern "C" void app_main(void) {
   // report the average wall-clock time of 10 runs.
   //
   input_tensor->assign(input_shape, ds.data, input_exponent, input_dtype);
+
+  // First-run memory profiling: measure internal-RAM allocations caused by
+  // lazy tensor allocation on the very first model run.
+  size_t before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  model->run(input_tensor); // first call - this is where lazy allocs happen
+  size_t after_first = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  model->run(input_tensor); // second call - should be identical to after_first
+  size_t after_second = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "delta run1: %d, delta run2: %d", before - after_first,
+           after_first - after_second);
+
   model->run(); // warm-up
   float avg_us = run_and_time(model, 10);
   ESP_LOGI(TAG, "Average single-inference latency: %.1f us (%.3f ms)", avg_us,

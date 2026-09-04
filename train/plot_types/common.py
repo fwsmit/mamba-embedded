@@ -68,14 +68,17 @@ def fig_pdf_path(name):
     return os.path.join(PDF_DIR, name)
 
 
-def savefig(fig, title, filename, dpi=None, svg=False):
+def savefig(fig, title, filename, dpi=None, svg=False, pad=None, tight=True,
+            tight_bbox=False):
     dpi = FIG_DPI if dpi is None else dpi
-    fig.tight_layout()
+    if tight:
+        fig.tight_layout(pad=pad) if pad is not None else fig.tight_layout()
+    bbox_kw = dict(bbox_inches="tight", pad_inches=0.15) if tight_bbox else {}
     slug = slugify(title)
     fig_path_png = fig_path(f"{filename}_{slug}.png")
     fig_path_pdf = fig_pdf_path(f"{filename}_{slug}.pdf")
-    fig.savefig(fig_path_png, dpi=dpi)
-    fig.savefig(fig_path_pdf)
+    fig.savefig(fig_path_png, dpi=dpi, **bbox_kw)
+    fig.savefig(fig_path_pdf, **bbox_kw)
     if svg:
         fig_path_svg = fig_path(f"{filename}_{slug}.svg")
         fig.savefig(fig_path_svg)
@@ -149,10 +152,11 @@ def pt_to_data(ax, fig, pt):
 
 
 def beeswarm_box(ax, fig, x, values, color, marker, box_width=BOX_WIDTH,
-                show_mean=True):
+                show_mean=True, fontsize=8):
     """Draw one column of light raw points + boxplot + black mean diamond with
     a numeric label. Returns (mean, median, q1, q3, label). Pass show_mean=False
-    to skip the mean diamond and its label."""
+    to skip the mean diamond and its label. ``fontsize`` sets the mean label
+    size."""
     values = np.asarray(values, dtype=float)
     offs = beeswarm_offsets(values)
     ax.scatter(x + offs, values, s=16, alpha=0.5, color=color, marker=marker,
@@ -179,9 +183,9 @@ def beeswarm_box(ax, fig, x, values, color, marker, box_width=BOX_WIDTH,
         if x + pt_to_data(ax, fig, 6.0) < x + box_width / 2:
             ax.annotate(label, (x, mean), textcoords="offset points",
                         xytext=(0, 5), ha="center", va="bottom",
-                        fontsize=8, zorder=6, color="black", bbox=bbox)
+                        fontsize=fontsize, zorder=6, color="black", bbox=bbox)
         else:
             ax.annotate(label, (x, mean), textcoords="offset points",
                         xytext=(6, 0), ha="left", va="center",
-                        fontsize=8, zorder=6, color="black", bbox=bbox)
+                        fontsize=fontsize, zorder=6, color="black", bbox=bbox)
     return mean, med, q1, q3, label

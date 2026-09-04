@@ -7,10 +7,22 @@ published Mamba-Lite micro reference figures, per dataset (HAR / KWS).
 
 Three metrics are compared, each as one bar chart per dataset:
   * average single-inference latency (ms)
-  * peak memory usage = internal RAM + PSRAM totals from the memory summary (KB),
-    with each model's bar stacked and coloured to show the internal-RAM and
-    PSRAM parts separately
-  * flash model storage (bytes; converted from the KB flash total)
+  * memory footprint (KB) as a HIERARCHICAL stacked bar per experiment, using
+    the full memory profile: the bar is split into parameters (in flash),
+    their RAM copy (Parameter copy, drawn in the same colour as parameters),
+    variables, the model (fbs_model, non-parameter part) and others. The bar
+    total is RAM + PSRAM + flash. Mamba-Lite Micro publishes no breakdown (only
+    a RAM + flash total), so its bar is a single hatched bar.
+  * flash model storage (bytes; converted from the KB flash total), with
+    each model's bar stacked and coloured to show the parameter and the rest
+    ("other") parts separately. Mamba-Lite Micro only reports a flash total,
+    so its bar is drawn as a single untisplitted bar.
+
+The RAM and flash charts share the latency chart's bar grouping: runs are
+merged to one bar per model/quantization (int8 and int8-TQT averaged,
+bidir-add and bidir-mul averaged into one bidirectional bar) and the
+Mamba-Lite reference is inserted among the single-direction bars, with
+"single direction" / "bidirectional" group labels below the axis.
 
 Only successfully finished runs are plotted (a run is successful if the log
 contains an ``INFERENCE_OK`` line together with a latency figure and a memory
@@ -27,16 +39,36 @@ from matplotlib.patches import Patch
 from .common import savefig, create_out_dirs
 
 # Colour palette (matches the repository's COLORS in plot_arch_search.py).
-MODEL_COLOR  = "#4C9BE8"   # this work, solid bars (default fill)
-INTERNAL_RAM_COLOR = "#4C9BE8"   # internal-RAM stack segment
-PSRAM_COLOR        = "#9C27B0"   # PSRAM stack segment
-REF_COLOR    = "#E8834C"   # Mamba-Lite micro reference
+MODEL_COLOR    = "#4C9BE8"   # this work, solid bars (default fill)
+PARAM_COLOR    = "#4C9BE8"   # parameters (in fbs_model) and their RAM copy
+VARIABLE_COLOR = "#9C27B0"   # variables
+FBS_COLOR      = "#2E8B57"   # model (fbs_model, non-parameter part)
+OTHERS_COLOR   = "#A6A6A6"   # other memory (buffers, activations, ...)
+OTHER_COLOR    = "#2E8B57"   # flash "other" (non-parameter) stack segment
+REF_COLOR      = "#E8834C"   # Mamba-Lite micro reference
 
 DATASET_LABEL = {"har": "HAR", "kws": "KWS"}
 DATASET_ORDER = ["har", "kws"]
 
 LAT_RE   = re.compile(r"Average single-inference latency:\s*([\d.]+)\s*us")
 TOTAL_RE = re.compile(r"\|\s*total\s*\|\s*([\d.]+)KB\s*\|\s*([\d.]+)KB\s*\|\s*([\d.]+)KB\s*\|")
+# Flash breakdown line under the fbs_model entry: "|  -- parameter  | ... |  -- X KB  |"
+PARAM_RE = re.compile(r"-- parameter.*?--\s*([\d.]+)\s*KB")
+
+
+def _mem_row(text, name):
+    """Parse one category row of the memory summary (e.g. 'fbs_model',
+    'parameter_copy', 'variable', 'others') into its three column values
+    (internal RAM, PSRAM, FLASH) in KB; empty cells become 0.0."""
+    m = re.search(
+        r"\|\s*" + name + r"\s*\|"
+        r"\s*(?:(--\s*)?([\d.]+)\s*KB)?\s*\|"
+        r"\s*(?:(--\s*)?([\d.]+)\s*KB)?\s*\|"
+        r"\s*(?:(--\s*)?([\d.]+)\s*KB)?\s*\|", text)
+    if not m:
+        return None
+    return [float(m.group(2 * i + 2)) if m.group(2 * i + 2) else 0.0
+            for i in range(3)]
 
 # Architecture / quantization display labels and ordering (for tidy bars).
 # "single" is this work's own single-direction model, shown as "our" on the
@@ -71,10 +103,13 @@ def _sort_key(entry):
     return a, q
 
 
-def _merge_bars(entries):
+def _merge_bars(entries, fields=("value",)):
     """Merge the runs of one bar plot: average the int8 and int8-TQT runs of
     the same architecture (one 8-bit number per model), then average the
-    bidir-add and bidir-mul architectures into a single 'bidir' entry."""
+    bidir-add and bidir-mul architectures into a single 'bidir' entry.
+
+    ``fields`` names the numeric value(s) to average per bar (a single metric,
+    or the stacked parts of a RAM / flash bar)."""
     # 1) Average the two int8 quantizations of each architecture.
     by_arch = {}
     for e in entries:
@@ -86,7 +121,8 @@ def _merge_bars(entries):
         if int8:
             m = dict(int8[0])
             m["quant"] = "int8"
-            m["value"] = float(np.mean([e["value"] for e in int8]))
+            for f in fields:
+                m[f] = float(np.mean([e[f] for e in int8]))
             per_arch.append(m)
         per_arch.extend(others)
 
@@ -101,7 +137,8 @@ def _merge_bars(entries):
             e["model"] = f"{_display_arch(arch)} ({e['quant']})"
             out.append(e)
         else:
-            prev["value"] = (prev["value"] + e["value"]) / 2.0
+            for f in fields:
+                prev[f] = (prev[f] + e[f]) / 2.0
     out.sort(key=_sort_key)
     return out
 
@@ -135,6 +172,7 @@ def _load_runs(repo_root):
                     encoding="utf-8", errors="replace").read()
         lat_m = LAT_RE.search(text)
         tot_m = TOTAL_RE.search(text)
+        par_m = PARAM_RE.search(text)
         # Only count runs that actually completed: an INFERENCE line plus both
         # the latency figure and the memory-summary total row.
         if "INFERENCE" not in text or not lat_m or not tot_m:
@@ -143,6 +181,22 @@ def _load_runs(repo_root):
         arch, quant = _parse_stem(stem, dataset)
         internal, psram, flash = (float(tot_m.group(1)), float(tot_m.group(2)),
                                   float(tot_m.group(3)))
+        # Parameter part of the flash usage; the rest is "other". If the
+        # breakdown line is missing we cannot split the bar, so fall back to
+        # reporting no parameter part (all flash in "other").
+        param = float(par_m.group(1)) if par_m else 0.0
+
+        # Full memory profile: split the footprint by category (parameters and
+        # their RAM copy, variables, the fbs_model blob and other memory).
+        fbs, cpy, var, oth = (_mem_row(text, n) for n in
+                              ("fbs_model", "parameter_copy", "variable",
+                               "others"))
+        fbs_flash = fbs[2] if fbs else flash
+        # Parameters (the "-- parameter" flash sub-row, or the RAM copy), used
+        # both for the flash split and the hierarchical breakdown.
+        param = float(par_m.group(1)) if par_m else 0.0
+        if not param:
+            param = (cpy[1] if cpy else 0.0)
         runs[dataset].append({
             "arch": arch, "quant": quant, "model": f"{_display_arch(arch)} ({quant})",
             "latency_ms": float(lat_m.group(1)) * 1e-3,
@@ -150,10 +204,19 @@ def _load_runs(repo_root):
             "psram_kb": psram,
             "peak_ram_kb": internal + psram,
             "flash_bytes": flash * 1024.0,
+            "flash_param_bytes": param * 1024.0,
+            "flash_other_bytes": (flash - param) * 1024.0,
+            # Category breakdown (KB) for the hierarchical memory figure.
+            "param_flash_kb": param,
+            "model_flash_kb": max(0.0, fbs_flash - param),
+            "param_copy_kb": cpy[1] if cpy else 0.0,
+            "variable_kb": var[1] if var else 0.0,
+            "others_kb": (oth[0] + oth[1]) if oth else 0.0,
         })
+        other = (flash - param)
         print(f"  parsed: {fname}  latency={runs[dataset][-1]['latency_ms']:.2f} ms | "
               f"RAM={internal:.1f}+{psram:.1f}={runs[dataset][-1]['peak_ram_kb']:.1f} KB | "
-              f"flash={flash * 1024.0:.0f} B")
+              f"flash={flash * 1024.0:.0f} B ({param * 1024.0:.0f} param + {other * 1024.0:.0f} other)")
 
     for d in DATASET_ORDER:
         runs[d].sort(key=_sort_key)
@@ -233,42 +296,132 @@ def _draw_bars(models, ref_value, ylabel, ytitle, filename, colors=None,
     savefig(fig, ytitle, f"mambalite_{filename}", dpi=300)
 
 
-def _draw_stacked_ram(models, dataset, ytitle):
-    """Peak-memory bars stacked by RAM kind: each model's internal-RAM and PSRAM
-    parts are stacked and coloured separately. The reference bar is hatched."""
-    labels = [m["model"] for m in models] + [REF_LABEL]
+def _draw_hier_ram(models, dataset, ytitle, ref_position=None,
+                    groups=None, gap_before=None):
+    """Hierarchical memory bar chart: ONE stacked bar per experiment, using the
+    full memory-profile breakdown (per category and memory type). Each bar is
+    segmented bottom-to-top into:
+      parameters (the model's parameter blob in flash)
+      parameter copy (the RAM copy, drawn in the same colour as parameters)
+      variables
+      model (fbs_model, the non-parameter part of the flash model blob)
+      others (remaining memory)
+    The total bar height is therefore RAM + PSRAM + flash. The Mamba-Lite
+    reference only publishes a combined RAM + flash total, so its bar is a
+    single hatched bar. ref_position: model index at which the reference is
+    inserted (default: at the end of the model bars) so it groups with this
+    work's single-direction models; groups/gap_before label and separate the
+    single-direction and bidirectional bar clusters."""
+    # Segments, bottom-to-top, with (key, label, colour); parameters and their
+    # RAM copy share a colour ("the copy shown the same way").
+    segments = [
+        ("param_flash_kb", "Parameters", PARAM_COLOR),
+        ("param_copy_kb", "Parameter copy", PARAM_COLOR),
+        ("variable_kb", "Variables", VARIABLE_COLOR),
+        ("model_flash_kb", "Model (fbs_model)", FBS_COLOR),
+        ("others_kb", "Others", OTHERS_COLOR),
+    ]
+    labels = [m["model"] for m in models]
+    vals = {key: [m[key] for m in models] for key, _, _ in segments}
+    if ref_position is None:
+        ref_position = len(models)
+    labels.insert(ref_position, REF_LABEL)
+    # Reference total footprint = RAM + flash (it has no category breakdown).
+    ref_total = REFERENCE[dataset]["peak_ram_kb"] \
+        + REFERENCE[dataset]["flash_bytes"] / 1024.0
+    for key in vals:
+        vals[key].insert(ref_position, 0.0)
+
     n = len(labels)
+    positions = _bar_positions(n, gap_before)
+    rotation = _tick_rotation(labels)
     fig, ax = plt.subplots(figsize=(max(6.5, 0.5 * n), 6))
-    x = np.arange(n)
 
-    internal = [m["internal_ram_kb"] for m in models]
-    psram    = [m["psram_kb"] for m in models]
+    model_idx = [i for i in range(n) if i != ref_position]
+    bottoms = [0.0] * n
+    for key, _label, color in segments:
+        parts = [vals[key][i] for i in model_idx]
+        ax.bar([positions[i] for i in model_idx], parts,
+               bottom=[bottoms[i] for i in model_idx], color=color,
+               edgecolor="white", linewidth=0.5, width=0.8)
+        for i, v in zip(model_idx, parts):
+            bottoms[i] += v
 
-    # This work's models: stacked internal-RAM (bottom) + PSRAM (top).
-    ax.bar(x[:-1], internal, color=INTERNAL_RAM_COLOR, edgecolor="white",
-           linewidth=0.5, width=0.8)
-    ax.bar(x[:-1], psram, bottom=internal, color=PSRAM_COLOR, edgecolor="white",
-           linewidth=0.5, width=0.8)
-
-    # Mamba-Lite reference uses only internal RAM (no PSRAM): a single bar in
-    # the internal-RAM colour, hashed so it still reads as the comparison.
-    ax.bar([x[-1]], [REFERENCE[dataset]["peak_ram_kb"]], color=INTERNAL_RAM_COLOR,
+    # Mamba-Lite reference: single hatched bar at its total footprint.
+    ax.bar([positions[ref_position]], [ref_total], color=REF_COLOR,
            edgecolor="white", linewidth=0.5, width=0.8, hatch="//")
 
-    ax.set_xticks(x)
-    rotation = _tick_rotation(labels)
+    ax.set_xticks(positions)
     ax.set_xticklabels(labels, rotation=rotation,
                        ha="right" if rotation else "center", fontsize=9)
-    ax.set_ylabel("Peak RAM (KB)", fontsize=11)
+    ax.set_ylabel("Memory (KB)", fontsize=11)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
+    group_y = -0.24 if rotation else -0.13
+    for start, end, label in groups or []:
+        ax.text((positions[start] + positions[end]) / 2.0, group_y, label,
+                transform=ax.get_xaxis_transform(), ha="center", va="top",
+                fontsize=9)
+    handles = [Patch(facecolor=color, edgecolor="white", label=label)
+               for _, label, color in segments]
+    handles.append(Patch(facecolor=REF_COLOR, hatch="//", edgecolor="white",
+                         label=REF_LABEL))
+    ax.legend(handles=handles, fontsize=9, framealpha=1.0)
+    savefig(fig, ytitle, f"mambalite_peakram_{dataset}", dpi=300)
+
+
+def _draw_stacked_flash(models, dataset, ytitle, ref_position=None,
+                        groups=None, gap_before=None):
+    """Flash-storage bars stacked by content: each model's parameter and
+    "other" (everything else, e.g. program code) parts are stacked and
+    coloured separately. The Mamba-Lite reference has no such breakdown (only
+    a flash total is published), so its bar stays a single hatched bar,
+    inserted at ref_position (default: at the end of the model bars) so it
+    groups with this work's single-direction models; groups/gap_before label
+    and separate the single-direction and bidirectional bar clusters."""
+    labels = [m["model"] for m in models]
+    params = [m["flash_param_bytes"] for m in models]
+    others = [m["flash_other_bytes"] for m in models]
+    if ref_position is None:
+        ref_position = len(models)
+    labels.insert(ref_position, REF_LABEL)
+    params.insert(ref_position, 0.0)
+    others.insert(ref_position, REFERENCE[dataset]["flash_bytes"])
+
+    n = len(labels)
+    positions = _bar_positions(n, gap_before)
+    rotation = _tick_rotation(labels)
+    fig, ax = plt.subplots(figsize=(max(6.5, 0.5 * n), 6))
+
+    model_idx = [i for i in range(n) if i != ref_position]
+    # This work's models: stacked parameters (bottom) + other (top).
+    ax.bar([positions[i] for i in model_idx], [params[i] for i in model_idx],
+           color=PARAM_COLOR, edgecolor="white", linewidth=0.5, width=0.8)
+    ax.bar([positions[i] for i in model_idx], [others[i] for i in model_idx],
+           bottom=[params[i] for i in model_idx], color=OTHER_COLOR,
+           edgecolor="white", linewidth=0.5, width=0.8)
+
+    # Mamba-Lite reference: single bar (no parameter/other breakdown), hashed.
+    ax.bar([positions[ref_position]], [others[ref_position]], color=REF_COLOR,
+           edgecolor="white", linewidth=0.5, width=0.8, hatch="//")
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels, rotation=rotation,
+                       ha="right" if rotation else "center", fontsize=9)
+    ax.set_ylabel("Flash storage (bytes)", fontsize=11)
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+    group_y = -0.24 if rotation else -0.13
+    for start, end, label in groups or []:
+        ax.text((positions[start] + positions[end]) / 2.0, group_y, label,
+                transform=ax.get_xaxis_transform(), ha="center", va="top",
+                fontsize=9)
     handles = [
-        Patch(facecolor=INTERNAL_RAM_COLOR, edgecolor="white", label="Internal RAM"),
-        Patch(facecolor=PSRAM_COLOR, edgecolor="white", label="PSRAM"),
-        Patch(facecolor=INTERNAL_RAM_COLOR, hatch="//", edgecolor="white",
+        Patch(facecolor=PARAM_COLOR, edgecolor="white", label="Parameters"),
+        Patch(facecolor=OTHER_COLOR, edgecolor="white", label="Other"),
+        Patch(facecolor=REF_COLOR, hatch="//", edgecolor="white",
               label=REF_LABEL),
     ]
     ax.legend(handles=handles, fontsize=9, framealpha=1.0)
-    savefig(fig, ytitle, f"mambalite_peakram_{dataset}", dpi=300)
+    savefig(fig, ytitle, f"mambalite_flash_{dataset}", dpi=300)
 
 
 def create_mambalite_lite_plot(repo_root, title=None):
@@ -306,13 +459,24 @@ def create_mambalite_lite_plot(repo_root, title=None):
             f"latency_{dataset}",
             ref_position=n_single if merged else None, groups=groups,
             gap_before=(n_single + 1) if groups else None)
-        # Peak memory = internal RAM + PSRAM (stacked, coloured by RAM kind)
-        _draw_stacked_ram(models, dataset, f"Peak memory vs Mamba-Lite micro ({dl})")
-        # Flash storage in bytes
-        _draw_bars(
-            [dict(m, value=m["flash_bytes"]) for m in models], ref["flash_bytes"],
-            "Flash storage (bytes)", f"Flash size vs Mamba-Lite micro ({dl})",
-            f"flash_{dataset}")
+        # Memory: hierarchical stacked bars (parameters, parameter copy,
+        # variables, model/fbs_model, others) using the full memory profile,
+        # with the same bar grouping as the latency chart.
+        merged_ram = _merge_bars(models, fields=(
+            "internal_ram_kb", "psram_kb", "flash_bytes",
+            "param_flash_kb", "param_copy_kb", "variable_kb",
+            "model_flash_kb", "others_kb"))
+        _draw_hier_ram(
+            merged_ram, dataset, f"Memory vs Mamba-Lite micro ({dl})",
+            ref_position=n_single if merged_ram else None, groups=groups,
+            gap_before=(n_single + 1) if groups else None)
+        # Flash storage in bytes (parameter / other parts stacked), with the
+        # same bar grouping as the latency chart.
+        merged_flash = _merge_bars(models, fields=("flash_param_bytes", "flash_other_bytes"))
+        _draw_stacked_flash(
+            merged_flash, dataset, f"Flash size vs Mamba-Lite micro ({dl})",
+            ref_position=n_single if merged_flash else None, groups=groups,
+            gap_before=(n_single + 1) if groups else None)
 
     if not any_models:
         print("  No successful runs in experiments/mambalite-micro; "

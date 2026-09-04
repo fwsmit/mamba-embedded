@@ -1,7 +1,9 @@
+import re
 import optuna
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.gridspec as gridspec
 
 from optuna.importance import PedAnovaImportanceEvaluator, get_param_importances
 
@@ -43,7 +45,7 @@ def _row_key(sd):
     (single → bidir add → bidir mul), so the layout is stable regardless of
     the order/expansion of the config arguments."""
     name = sd["study_name"]
-    dataset = "har" if "har" in name else "kws"
+    dataset = 0 if sd.get("dataset", "").lower() == "har" else 1
     if "bidir-mul" in name:
         variant = 2
     elif "bidir" in name:
@@ -51,6 +53,29 @@ def _row_key(sd):
     else:
         variant = 0
     return (dataset, variant, name)
+
+
+def _row_label(sd):
+    """Row label: the plot_description variant. The dataset is shown by the
+    enclosing per-dataset subplot."""
+    # Manual relabelling for the importance heatmaps only (config labels are
+    # shared with other plot types): shortens bidirectional to bidir, which
+    # also turns "Multi-layer bidirectional" into "Multi-layer bidir".
+    label = re.sub(r"bidirectional", "bidir", sd["name"], flags=re.IGNORECASE)
+    return label[:1].upper() + label[1:]
+
+
+def _dataset_groups(rows):
+    """Split the (already dataset-sorted) rows into contiguous dataset groups:
+    a list of (dataset, first_row, last_row) tuples in display order."""
+    groups = []
+    for i, (sd, _po, _nl) in enumerate(rows):
+        dset = sd.get("dataset", "").lower()
+        if groups and groups[-1][0] == dset:
+            groups[-1] = (groups[-1][0], groups[-1][1], i)
+        else:
+            groups.append((dset, i, i))
+    return groups
 
 
 def _importance_cmap():
@@ -68,18 +93,37 @@ def _importance_cmap():
     )
 
 
-def _draw_heatmap(ax, matrix, row_labels, col_labels):
+def _study_searches_n_layers(study):
+    """True if `n_layers` is an actual searched hyperparameter for this study.
+
+    Single-layer studies fix n_layers at 1 (low=high, so no suggest_int call),
+    it never appears in any trial's params, and is therefore not relevant to
+    them.
+    """
+    return any(
+        "n_layers" in t.params
+        for t in study.get_trials(deepcopy=False, states=(optuna.trial.TrialState.COMPLETE,))
+    )
+
+
+def _draw_heatmap(ax, matrix, row_labels, col_labels, na_mask, show_x_labels=True):
     """One importance heatmap: rows are studies, columns are hyperparameters.
 
     All heatmaps share a 0–1 colour scale so colours mean the same thing
-    across objectives (each row's importances sum to ~1).
+    across objectives (each row's importances sum to ~1). Cells marked True in
+    `na_mask` (a param not searched by that study) are greyed out and show no
+    number. Pass show_x_labels=False to drop the column labels (used for all
+    panels except the bottom one, where labels would be duplicated).
     """
     im = ax.imshow(matrix, aspect="auto", cmap=_importance_cmap(), vmin=0.0, vmax=1.0)
     ax.set_xticks(range(len(col_labels)))
-    ax.set_xticklabels(col_labels, rotation=45, ha="right",
-                       rotation_mode="anchor", fontsize=12)
+    if show_x_labels:
+        ax.set_xticklabels(col_labels, rotation=45, ha="right",
+                           rotation_mode="anchor", fontsize=18)
+    else:
+        ax.tick_params(axis="x", labelbottom=False)
     ax.set_yticks(range(len(row_labels)))
-    ax.set_yticklabels(row_labels, fontsize=12)
+    ax.set_yticklabels(row_labels, fontsize=18)
     ax.set_xticks(np.arange(-0.5, len(col_labels), 1), minor=True)
     ax.set_yticks(np.arange(-0.5, len(row_labels), 1), minor=True)
     ax.grid(which="minor", color="white", linewidth=1.2)
@@ -87,21 +131,29 @@ def _draw_heatmap(ax, matrix, row_labels, col_labels):
     for r in range(matrix.shape[0]):
         for c in range(matrix.shape[1]):
             v = matrix[r, c]
+            if na_mask[r, c]:
+                ax.add_patch(plt.Rectangle((c - 0.5, r - 0.5), 1, 1, fill=True,
+                                           facecolor="#ececec", edgecolor="white",
+                                           linewidth=1.2))
+                continue
             if np.isnan(v):
                 continue
             r_, g_, b_ = im.cmap(im.norm(v))[:3]
             lum = 0.299 * r_ + 0.587 * g_ + 0.114 * b_
-            ax.text(c, r, f"{v:.2f}", ha="center", va="center", fontsize=10,
+            ax.text(c, r, f"{v:.2f}".lstrip("0") or "0", ha="center",
+                    va="center", fontsize=16,
                     color="white" if lum < 0.55 else "black")
     return im
 
 
 def create_param_importance_plot(studies_data):
     """
-    Plot hyperparameter importances as one heatmap per objective (Accuracy,
-    Latency): rows are the studies, columns are the hyperparameters, cells
-    are coloured by importance (PedAnova evaluator on the raw objective
-    value, so the numbers agree with optuna-dashboard).
+    Plot hyperparameter importances as one figure per objective (Accuracy,
+    Latency): each figure holds two stacked heatmaps, one per dataset (HAR on
+    top, KWS below), with the dataset name above each heatmap and column
+    labels only on the bottom one. Rows are the studies, columns are the
+    hyperparameters, cells are coloured by importance (PedAnova evaluator on
+    the raw objective value, so the numbers agree with optuna-dashboard).
 
     Parameters
     ----------
@@ -112,7 +164,7 @@ def create_param_importance_plot(studies_data):
     # Columns: canonical hyperparameter order plus any extras that appear in
     # some studies but are not listed in PARAM_ORDER.
     col_labels = list(PARAM_ORDER)
-    rows = []  # (sd, [importance dict per objective])
+    rows = []  # (sd, [importance dict per objective], has_n_layers)
     row_labels = []
     for sd in sorted(studies_data, key=_row_key):
         n_completed = len(sd["study"].get_trials(
@@ -140,8 +192,8 @@ def create_param_importance_plot(studies_data):
                     col_labels.append(p)
         if not ok:
             continue
-        rows.append((sd, per_objective))
-        row_labels.append(sd["study_name"])
+        rows.append((sd, per_objective, _study_searches_n_layers(sd["study"])))
+        row_labels.append(_row_label(sd))
 
     if not rows:
         print("  No hyperparameter importance heatmaps created.")
@@ -149,15 +201,45 @@ def create_param_importance_plot(studies_data):
 
     n_params = len(col_labels)
     matrix = np.zeros((len(rows), n_params))
+    na_mask = np.zeros((len(rows), n_params), dtype=bool)
+    if "n_layers" in col_labels:
+        n_layer_col = col_labels.index("n_layers")
+        for i, (sd, per_objective, has_n_layers) in enumerate(rows):
+            if not has_n_layers:
+                na_mask[i, n_layer_col] = True
+    groups = _dataset_groups(rows)
     for objective_id, oname in OBJECTIVES:
-        for i, (sd, per_objective) in enumerate(rows):
+        for i, (sd, per_objective, _has) in enumerate(rows):
             imp = per_objective[objective_id]
             for j, p in enumerate(col_labels):
-                matrix[i, j] = imp.get(p, 0.0)
-        fig, ax = plt.subplots(figsize=(max(7.5, 0.9 * n_params + 3.0),
-                                        0.6 * len(rows) + 2.6))
-        im = _draw_heatmap(ax, matrix, row_labels, col_labels)
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Importance")
-        savefig(fig, f"Hyperparameter Importances — {oname}", "param_importance")
+                matrix[i, j] = np.nan if na_mask[i, j] else imp.get(p, 0.0)
+        # One stacked heatmap per dataset instead of group labels inside a
+        # single heatmap; the dataset name sits on top of each panel and the
+        # column labels are only drawn on the bottom (last) panel.
+        n_datasets = len(groups)
+        # Panel heights proportional to their row counts so every heatmap
+        # square has the same size despite the datasets having different
+        # numbers of studies (HAR 3, KWS 4).
+        fig = plt.figure(figsize=(max(9.5, 1.05 * n_params + 6.0),
+                                   0.6 * len(rows) + 1.2 * n_datasets + 1.6))
+        height_ratios = [end - start + 1 for _d, start, end in groups]
+        gs = gridspec.GridSpec(n_datasets, 1, height_ratios=height_ratios,
+                               wspace=0.05, hspace=0.55)
+        ims, axes = [], []
+        for gi, (dset, start, end) in enumerate(groups):
+            ax = fig.add_subplot(gs[gi, 0])
+            axes.append(ax)
+            last = gi == n_datasets - 1
+            ims.append(_draw_heatmap(ax, matrix[start:end + 1],
+                                     row_labels[start:end + 1], col_labels,
+                                     na_mask[start:end + 1],
+                                     show_x_labels=last))
+            ax.set_title(dset.upper(), fontsize=20, fontweight="bold")
+        cb = fig.colorbar(ims[-1], ax=axes, fraction=0.046, pad=0.04,
+                         ticks=[0.0, 0.25, 0.5, 0.75, 1.0])
+        # cb.set_label("Importance", fontsize=18)
+        cb.ax.tick_params(labelsize=18)
+        savefig(fig, f"Hyperparameter Importances — {oname}", "param_importance",
+                pad=1.5, tight_bbox=True)
         plt.close(fig)
     return True
