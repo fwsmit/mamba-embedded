@@ -16,6 +16,8 @@ MARKER_PAR = "D"
 ACCURACY_LABEL = "Accuracy on validation set"
 LATENCY_MCU_LABEL = "Latency on MCU (ms, lower is better)"
 LATENCY_PC_LABEL = "Latency on PC (μs, lower is better)"
+AXIS_LABEL_SIZE = 14
+TICK_LABEL_SIZE = 12
 
 
 class _TwoMarkerProxy:
@@ -143,7 +145,7 @@ def create_mcu_pareto_plot(studies_data, title,
             for lx, ly, tn in zip(mcu_highlight_x, mcu_highlight_y, mcu_highlight_tn):
                 ax_pc.annotate(str(tn), (lx, ly),
                                textcoords="offset points", xytext=(8, 8),
-                               fontsize=7, fontweight="bold", color="red",
+                               fontsize=10, fontweight="bold", color="red",
                                zorder=6)
             handles_pc = [
                 Line2D([0], [0], marker=MARKER_ALL, color="w",
@@ -184,7 +186,7 @@ def create_mcu_pareto_plot(studies_data, title,
             for lat, acc, _, tn_pt in mcu_pts:
                 ax_mcu.annotate(str(tn_pt), (lat, acc / 100.0),
                                 textcoords="offset points", xytext=(6, 6),
-                                fontsize=7, fontweight="bold",
+                                fontsize=10, fontweight="bold",
                                 color=sd["color_par"], zorder=5)
 
     # ── Left panel decorations ───────────────────────────────────────────────
@@ -240,7 +242,7 @@ def create_mcu_pareto_plot(studies_data, title,
     savefig(fig, title, "muc_pareto")
 
 
-def create_pareto_front_plot(studies_data, title, use_mcu=False):
+def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0):
     """
     Plot and save the Pareto front comparison figure for N studies.
 
@@ -253,6 +255,10 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False):
         Used in the plot title and saved file names.
     use_mcu : bool
         If True, plot MCU accuracy vs MCU latency instead of PC objectives.
+    top_acc : float or None
+        Upper y-axis limit as a fraction (default 1.0 = 100%%). Pass None to
+        frame the axis around the actual accuracy range of the trials instead
+        of capping at 100%%.
     """
     n_studies = len(studies_data)
 
@@ -273,22 +279,27 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False):
         ax.step(sd["par"]["latency"], sd["par"]["accuracy"],
                 color=sd["color_par"], linewidth=1.8, where="post", zorder=3)
 
-    # ── Frame y-axis around the Pareto front accuracy, capped at 100% ──────
+    # ── Frame y-axis around the Pareto front accuracy ───────────────────────
     all_par_acc = np.concatenate([sd["par"]["accuracy"].values for sd in studies_data])
     if len(all_par_acc) > 0:
         lo_acc = all_par_acc.min()
-        total_range = 1.0 - lo_acc
-        if total_range > 0:
-            pad = total_range * 0.2
+        if top_acc is None:
+            # auto: frame around the Pareto front points themselves
+            hi_acc = all_par_acc.max()
+            spread = hi_acc - lo_acc
+            pad = spread * 0.1 if spread > 0 else 0.01
+            bot = np.floor(max(0.0, lo_acc - pad) / 0.02) * 0.02
+            top = np.ceil(min(1.0, hi_acc + pad) / 0.02) * 0.02
         else:
-            pad = 0.01  # fallback when all have perfect accuracy
-        bot = max(0.86, lo_acc - pad)
-        ax.set_ylim(bot, 1.0)
-        tick_start = np.ceil(bot / 0.02) * 0.02
-        ax.set_yticks(np.arange(tick_start, 1.001, 0.02))
+            spread = top_acc - lo_acc
+            pad = spread * 0.2 if spread > 0 else 0.01
+            bot = max(0.86, lo_acc - pad)
+            top = top_acc
+        ax.set_ylim(bot, top)
     else:
-        ax.set_yticks(np.arange(0.80, 1.001, 0.02))
+        pass
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
+    ax.tick_params(axis="both", labelsize=TICK_LABEL_SIZE)
 
     # ── Build legend — one entry per study, two markers side-by-side ─────────
     legend_elements = []
@@ -300,7 +311,8 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False):
     ax.legend(handles=legend_elements,
               labels=[sd["name"] for sd in studies_data],
               handler_map={_TwoMarkerProxy: _TwoMarkerHandler()},
-              framealpha=0.9, fontsize=9)
+              loc="lower right",
+              framealpha=0.9, fontsize=13)
 
     # ── Frame x-axis starting at latency 0, with padding on the right ─────────
     all_par_lat = np.concatenate([sd["par"]["latency"].values for sd in studies_data])
@@ -328,8 +340,8 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False):
                 color=sd["color_par"], linewidth=1.8, zorder=3)
 
     xlabel = LATENCY_MCU_LABEL if use_mcu else LATENCY_PC_LABEL
-    ax.set_xlabel(xlabel, fontsize=11)
-    ax.set_ylabel(ACCURACY_LABEL, fontsize=11)
+    ax.set_xlabel(xlabel, fontsize=AXIS_LABEL_SIZE)
+    ax.set_ylabel(ACCURACY_LABEL, fontsize=AXIS_LABEL_SIZE)
 
     n_studies = len(studies_data)
     ax.grid(True, alpha=0.3, linestyle="--")

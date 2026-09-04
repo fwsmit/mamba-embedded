@@ -192,6 +192,12 @@ def main():
              "in the Pareto front plot (only valid with --plot pareto)."
     )
     parser.add_argument(
+        "--par-acc-top", choices=["100", "auto"], default="100",
+        help="Top of the y-axis in the Pareto front plot: '100' (default) caps at "
+             "100%%, 'auto' frames the axis around the actual accuracy range of the "
+             "trials (only valid with --plot pareto)."
+    )
+    parser.add_argument(
         "--ylim", nargs=2, type=float, default=None, metavar=("LOW", "HIGH"),
         help="Fix the y-axis range (used with --plot quantization_loss and "
              "--plot val_test_gap). Pass the same values to comparable plots "
@@ -372,7 +378,8 @@ def main():
                 sd["df"] = mcu_df
                 sd["par"] = par
 
-        create_pareto_front_plot(studies_data, title, use_mcu=args.use_mcu)
+        create_pareto_front_plot(studies_data, title, use_mcu=args.use_mcu,
+                                 top_acc=None if args.par_acc_top == "auto" else 1.0)
         plot_created = True
 
     elif args.plot == "scatter":

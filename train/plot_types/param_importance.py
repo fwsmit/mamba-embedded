@@ -62,7 +62,14 @@ def _row_label(sd):
     # shared with other plot types): shortens bidirectional to bidir, which
     # also turns "Multi-layer bidirectional" into "Multi-layer bidir".
     label = re.sub(r"bidirectional", "bidir", sd["name"], flags=re.IGNORECASE)
-    return label[:1].upper() + label[1:]
+    label = label[:1].upper() + label[1:]
+    # Wrap the long labels onto two lines so they do not dominate the figure
+    # width.
+    if label.startswith("Multi-layer"):
+        label = "Multi-layer\n" + label[len("Multi-layer"):].lstrip()
+    elif label == "Single direction":
+        label = "Single\ndirection"
+    return label
 
 
 def _dataset_groups(rows):
@@ -115,15 +122,15 @@ def _draw_heatmap(ax, matrix, row_labels, col_labels, na_mask, show_x_labels=Tru
     number. Pass show_x_labels=False to drop the column labels (used for all
     panels except the bottom one, where labels would be duplicated).
     """
-    im = ax.imshow(matrix, aspect="auto", cmap=_importance_cmap(), vmin=0.0, vmax=1.0)
+    im = ax.imshow(matrix, aspect="equal", cmap=_importance_cmap(), vmin=0.0, vmax=1.0)
     ax.set_xticks(range(len(col_labels)))
     if show_x_labels:
         ax.set_xticklabels(col_labels, rotation=45, ha="right",
-                           rotation_mode="anchor", fontsize=18)
+                           rotation_mode="anchor", fontsize=12)
     else:
         ax.tick_params(axis="x", labelbottom=False)
     ax.set_yticks(range(len(row_labels)))
-    ax.set_yticklabels(row_labels, fontsize=18)
+    ax.set_yticklabels(row_labels, fontsize=12)
     ax.set_xticks(np.arange(-0.5, len(col_labels), 1), minor=True)
     ax.set_yticks(np.arange(-0.5, len(row_labels), 1), minor=True)
     ax.grid(which="minor", color="white", linewidth=1.2)
@@ -141,7 +148,7 @@ def _draw_heatmap(ax, matrix, row_labels, col_labels, na_mask, show_x_labels=Tru
             r_, g_, b_ = im.cmap(im.norm(v))[:3]
             lum = 0.299 * r_ + 0.587 * g_ + 0.114 * b_
             ax.text(c, r, f"{v:.2f}".lstrip("0") or "0", ha="center",
-                    va="center", fontsize=16,
+                    va="center", fontsize=11,
                     color="white" if lum < 0.55 else "black")
     return im
 
@@ -215,16 +222,27 @@ def create_param_importance_plot(studies_data):
                 matrix[i, j] = np.nan if na_mask[i, j] else imp.get(p, 0.0)
         # One stacked heatmap per dataset instead of group labels inside a
         # single heatmap; the dataset name sits on top of each panel and the
-        # column labels are only drawn on the bottom (last) panel.
+        # column labels are only drawn on the bottom (last) panel. Equal
+        # aspect (square cells) makes the required panel height proportional
+        # to its row count; the figure height is derived so panels fill their
+        # allocated width exactly (too tall would leave a blank gap between
+        # the panels, too short a narrower, cropped heatmap).
         n_datasets = len(groups)
-        # Panel heights proportional to their row counts so every heatmap
-        # square has the same size despite the datasets having different
-        # numbers of studies (HAR 3, KWS 4).
-        fig = plt.figure(figsize=(max(9.5, 1.05 * n_params + 6.0),
-                                   0.6 * len(rows) + 1.2 * n_datasets + 1.6))
+        # Target square cell size (inches): the width follows from it and the
+        # height from the fill formula below, so the whole figure stays
+        # page-sized while the cells remain square.
+        cell_in = 0.45
+        axes_frac = 0.705    # axes width / figure width (incl. colorbar)
+        usable = 0.77        # fig.top - fig.bottom (default subplot margins)
+        HS = 0.3            # vertical gap between panels (fraction of avg panel height)
+        W = cell_in * n_params / axes_frac
+        sum_rows = sum(end - start + 1 for _d, start, end in groups)
+        t_needed = axes_frac * W * sum_rows / n_params
+        H = t_needed * (1 + HS / n_datasets) / usable
+        fig = plt.figure(figsize=(W, H))
         height_ratios = [end - start + 1 for _d, start, end in groups]
         gs = gridspec.GridSpec(n_datasets, 1, height_ratios=height_ratios,
-                               wspace=0.05, hspace=0.55)
+                               wspace=0.05, hspace=HS)
         ims, axes = [], []
         for gi, (dset, start, end) in enumerate(groups):
             ax = fig.add_subplot(gs[gi, 0])
@@ -234,11 +252,10 @@ def create_param_importance_plot(studies_data):
                                      row_labels[start:end + 1], col_labels,
                                      na_mask[start:end + 1],
                                      show_x_labels=last))
-            ax.set_title(dset.upper(), fontsize=20, fontweight="bold")
-        cb = fig.colorbar(ims[-1], ax=axes, fraction=0.046, pad=0.04,
+            ax.set_title(dset.upper(), fontsize=13, fontweight="bold")
+        cb = fig.colorbar(ims[-1], ax=axes, fraction=0.060, pad=0.04,
                          ticks=[0.0, 0.25, 0.5, 0.75, 1.0])
-        # cb.set_label("Importance", fontsize=18)
-        cb.ax.tick_params(labelsize=18)
+        cb.ax.tick_params(labelsize=10)
         savefig(fig, f"Hyperparameter Importances — {oname}", "param_importance",
                 pad=1.5, tight_bbox=True)
         plt.close(fig)

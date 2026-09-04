@@ -64,6 +64,49 @@ idf.py flash monitor
 
 This compiles the ESP-DL inference example and flashes it to the device.
 
+## Run all experiments
+
+To run the complete experiment pipeline — architecture search followed by
+quantization, MCU inference and result collection for every experiment — use
+`run-all-experiments.sh`:
+
+```shell
+./run-all-experiments.sh
+```
+
+The script runs two steps on all configurations in `config/har/` and
+`config/kws/`:
+
+1. `python -m train.arch_search` — Optuna hyperparameter search for each
+   experiment (HAR and KWS, single-direction and bidirectional models),
+   storing trials in the `mamba_hpo.db` Optuna database.
+2. `python -m train.top_models` — select the top models from each study,
+   quantize them to ESP-DL `.espdl` format, flash and run them on the
+   ESP32-S3 (via `run-esp.sh`), and store the results in
+   `experiments/<study>/`.
+
+> **Note:** Step 2 requires the ESP32-S3 to be connected on `/dev/ttyACM0`.
+> Run `conda activate torch-pascal` first (or `conda run -n torch-pascal
+> ./run-all-experiments.sh`) so the Python scripts run in the right
+> environment.
+
+## Create all plots
+
+To regenerate every figure used in the thesis from the experiment results in
+`experiments/`, run:
+
+```shell
+./create-all-plots.sh
+```
+
+The script removes the previous `.png` and `.pdf` figures first and then
+creates all plots used in the paper.
+
+Figures are written to `figures/` as `.png` (plus `.svg` for plot types
+that opt in) and to `figures/pdf/` as `.pdf`. Requires the experiment results
+to exist first — run `./run-all-experiments.sh` beforehand if they are
+missing.
+
 ## Environment variables
 
 `MODEL`: Select which model to use. Choices from the following models: `mamba-1` `mamba-3`.
