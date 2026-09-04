@@ -21,115 +21,114 @@ from matplotlib.lines import Line2D
 from .common import savefig
 
 ALPHA_SELECTED = 0.95
-MARKER_SELECTED = "D"
-FIGSIZE = (10.5, 8)
+FIGSIZE = (10.5, 9.5)
 AXIS_LABEL_SIZE = 14
 TICK_LABEL_SIZE = 12
-TITLE_SIZE = 16
-LEGEND_SIZE = 11
-ANNOTATION_SIZE = 10
-LITERATURE_ANNOTATION_SIZE = 9
+LEGEND_SIZE = 9
+LIT_COLORS = plt.get_cmap("tab10").colors
+MODEL_MARKERS = ("o", "^", "s", "P", "v", "<", ">", "h", "p", "*", "X")
+OURS_COLOR = "#2E7D32"
 
 
 # ── Literature reference points (overlaid for HAR/KWS studies) ─────────────
 # Sources collected in har-numbers-literature.md and kws-numbers-literature.md.
 # To add a new point, append a
 # dict with these keys:
-#   name      : short label used for the annotation and the legend
+#   name      : short label used in the legend
 #   params    : number of parameters (scalar)
 #   value     : reported accuracy in percent (or F1-score, see metric)
-#   metric    : "accuracy" or "f1" — f1 points get a distinct marker and an
-#               "(F1, …)" suffix in their annotation so they are not mistaken
-#               for accuracy numbers
+#   metric    : "accuracy" or "f1" — f1 points use open markers in the plot
 #   source    : free-text citation (arXiv id / paper title)
-#   cost      : optional compute cost in millions (MACs or FLOPs, see
-#               cost_unit); shown in the annotation as e.g. "9.3M MACs"
+#   group     : manually assigned model family used for markers and lines
+#   cost      : optional compute cost in millions (MACs or FLOPs, see cost_unit)
 #   cost_unit : "MACs" or "FLOPs" (only meaningful with ``cost``)
-#   note      : optional free-text nuance (e.g. "average across datasets");
-#               shown in the annotation
-LIT_COLOR = "#111111"
-LIT_MARKERS = {"accuracy": "X", "f1": "P"}
-LIT_ANNOTATION_OFFSETS = {
-    "TinierHAR": (-7, 10, "right"),
-    "TinyHAR": (7, -13, "left"),
-    "TinySpeech-X": (7, -13, "left"),
-    "LMU-4": (7, 18, "left"),
-    "TinySpeech-Y": (7, -22, "left"),
-    "MambaLite-Micro": (7, -18, "left"),
-    "MicrobiconvLSTM": (7, -14, "left"),
-}
+#   note      : optional free-text nuance (e.g. "average across datasets")
 HAR_LITERATURE_POINTS = [
     dict(name="Novac et al.", params=3958, value=92.41, metric="accuracy",
-         source="arXiv:2105.13331"),
+         source="arXiv:2105.13331", group="Novac et al."),
     dict(name="MicrobiconvLSTM", params=11400, value=93.41, metric="accuracy",
-         source="arXiv:2602.06523", cost=0.42, cost_unit="MACs",
+         source="arXiv:2602.06523", group="MicrobiconvLSTM", cost=0.42, cost_unit="MACs",
          note="average"),
     dict(name="Machar", params=67380, value=99.32, metric="accuracy",
-         source="arXiv:2602.06523", cost=10.37, cost_unit="MFLOPs"),
+         source="arXiv:2602.06523", group="Machar", cost=10.37, cost_unit="MFLOPs"),
     dict(name="Crossover-BiDir-BabyMamba", params=27000, value=95.10,
-         metric="f1", source="BabyMamba-HAR", cost=2.21, cost_unit="MACs"),
+         metric="f1", source="BabyMamba-HAR", group="BabyMamba-HAR",
+         cost=2.21, cost_unit="MACs"),
     dict(name="CI-BabyMamba-HAR", params=28000, value=85.80, metric="f1",
-         source="BabyMamba-HAR", cost=50.92, cost_unit="MACs"),
+         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=50.92,
+         cost_unit="MACs"),
     dict(name="TinyHAR", params=55000, value=96.53, metric="f1",
-         source="BabyMamba-HAR", cost=9.29, cost_unit="MACs"),
+         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=9.29,
+         cost_unit="MACs"),
     dict(name="TinierHAR", params=33000, value=96.37, metric="f1",
-         source="BabyMamba-HAR", cost=1.73, cost_unit="MACs"),
+         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=1.73,
+         cost_unit="MACs"),
     dict(name="DeepConvLSTM", params=136000, value=93.53, metric="f1",
-         source="BabyMamba-HAR", cost=15.51, cost_unit="MACs"),
+         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=15.51,
+         cost_unit="MACs"),
     dict(name="MambaLite-Micro", params=37100, value=92.7, metric="accuracy",
-         source="MambaLite-Micro", cost=123.4, cost_unit="ms"),
+         source="MambaLite-Micro", group="MambaLite-Micro", cost=123.4,
+         cost_unit="ms"),
     dict(name="HARMamba", params=388300, value=97.01, metric="f1",
-         source="HARMamba", cost=11.07, cost_unit="MFLOPs"),
+         source="HARMamba", group="HARMamba", cost=11.07,
+         cost_unit="MFLOPs"),
 ]
 
 # Sources collected in kws-numbers-literature.md.  The LMU models report their
 # model size in kbits rather than a parameter count; they are converted to
 # parameters here assuming int8 storage (1 byte = 1 param, kbits / 8), which
-# is noted on their annotations.  `cost` carries each TinySpeech model's
+# is noted in the legend.  `cost` carries each TinySpeech model's
 # compute in millions of Mult-Adds.
 KWS_LITERATURE_POINTS = [
     dict(name="MambaLite-Micro", params=35978, value=92.5, metric="accuracy",
-         source="MambaLite-Micro", cost=1133.6, cost_unit="ms"),
+         source="MambaLite-Micro", group="MambaLite-Micro", cost=1133.6,
+         cost_unit="ms"),
     dict(name="TinySpeech-X", params=10800, value=94.6, metric="accuracy",
-         source="arXiv:2008.04245", cost=10.9, cost_unit="Mult-Adds"),
+         source="arXiv:2008.04245", group="TinySpeech", cost=10.9,
+         cost_unit="Mult-Adds"),
     dict(name="TinySpeech-Y", params=6100, value=93.6, metric="accuracy",
-         source="arXiv:2008.04245", cost=6.5, cost_unit="Mult-Adds"),
+         source="arXiv:2008.04245", group="TinySpeech", cost=6.5,
+         cost_unit="Mult-Adds"),
     dict(name="TinySpeech-Z", params=2700, value=92.4, metric="accuracy",
-         source="arXiv:2008.04245", cost=2.6, cost_unit="Mult-Adds"),
+         source="arXiv:2008.04245", group="TinySpeech", cost=2.6,
+         cost_unit="Mult-Adds"),
     dict(name="LMU-1", params=210375, value=96.9, metric="accuracy",
-         source="arXiv:2009.04465", note="model size, int8 params"),
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
     dict(name="LMU-2", params=45125, value=95.9, metric="accuracy",
-         source="arXiv:2009.04465", note="model size, int8 params"),
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
     dict(name="LMU-3", params=13125, value=95.0, metric="accuracy",
-         source="arXiv:2009.04465", note="model size, int8 params"),
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
     dict(name="LMU-4", params=6125, value=92.7, metric="accuracy",
-         source="arXiv:2009.04465", note="model size, int8 params"),
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
     # Further points from kws-numbers-literature-full-report.md.
     dict(name="TinySpeech-M", params=4700, value=91.9, metric="accuracy",
-         source="arXiv:2008.04245", cost=4.4, cost_unit="Mult-Adds"),
+         source="arXiv:2008.04245", group="TinySpeech", cost=4.4,
+         cost_unit="Mult-Adds"),
     dict(name="MicroCNN", params=4200, value=93.22, metric="accuracy",
-         source="arXiv:2511.07821"),
+         source="arXiv:2511.07821", group="MicroCNN"),
     dict(name="DS-CNN-S", params=4400, value=91.5, metric="accuracy",
-         source="ICASSP 2019", cost=5.4, cost_unit="Mult-Adds",
-         note="~91-92%"),
+         source="ICASSP 2019", group="DS-CNN", cost=5.4,
+         cost_unit="Mult-Adds", note="~91-92%"),
     dict(name="TC-ResNet8-0.25", params=5600, value=90.5, metric="accuracy",
-         source="InterSpeech 2019"),
+         source="InterSpeech 2019", group="TC-ResNet8-0.25"),
     dict(name="Res8-narrow", params=20000, value=90.1, metric="accuracy",
-         source="InterSpeech 2019", cost=143.2, cost_unit="Mult-Adds"),
+         source="InterSpeech 2019", group="Res8-narrow", cost=143.2,
+         cost_unit="Mult-Adds"),
     dict(name="TENet-6-narrow", params=17000, value=96.0, metric="accuracy",
-         source="Interspeech 2020", cost=0.553, cost_unit="Mult-Adds"),
+         source="Interspeech 2020", group="TENet", cost=0.553,
+         cost_unit="Mult-Adds"),
     dict(name="TKWS-3", params=14400, value=92.4, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025"),
+         source="bartoliEndtoEndEfficiencyKeyword2025", group="TKWS"),
     dict(name="TKWS-2", params=4600, value=88.8, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025"),
+         source="bartoliEndtoEndEfficiencyKeyword2025", group="TKWS"),
     dict(name="TENet6-N", params=17100, value=91.8, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025"),
+         source="bartoliEndtoEndEfficiencyKeyword2025", group="TENet"),
     dict(name="TENet6", params=54200, value=92.9, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025"),
+         source="bartoliEndtoEndEfficiencyKeyword2025", group="TENet"),
     dict(name="LicoNet-S", params=17400, value=93.6, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025"),
+         source="bartoliEndtoEndEfficiencyKeyword2025", group="LicoNet-S"),
     dict(name="DS-CNN", params=46500, value=91.2, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025"),
+         source="bartoliEndtoEndEfficiencyKeyword2025", group="DS-CNN"),
 ]
 
 
@@ -161,6 +160,11 @@ def select_n_front(x, y, n):
     return order[np.unique(positions)]
 
 
+def literature_group(point):
+    """Return the manually assigned model group for a literature point."""
+    return point["group"]
+
+
 def create_param_accuracy_plot(studies_data, title, n_models=10,
                                accuracy_field="test_quantized_accuracy",
                                selection_accuracy_field=None,
@@ -170,7 +174,7 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
     Scatter plot of number of parameters vs accuracy for the N most
     parameter-efficient models, selected from the combined Pareto front
     across all studies (max validation accuracy, min parameters) and plotted
-    with diamond markers and trial-number annotations at their test-set
+    with model-family markers and connecting lines at their test-set
     accuracy.
 
     Parameters
@@ -200,8 +204,9 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
 
     When any study targets the HAR or KWS dataset, reference points from the
     literature (see HAR_LITERATURE_POINTS / KWS_LITERATURE_POINTS) are
-    overlaid as black markers: accuracy values as crosses, F1-scores as
-    pentagons annotated with an "(F1)" suffix.
+    overlaid with one marker shape per model family. Variants in a family are
+    connected by a line and all paper names are collected in the legend below
+    the plot.
     """
     sel_field = selection_accuracy_field or accuracy_field
 
@@ -264,30 +269,31 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
         print()
     legend_elements = []
     legend_labels = []
+    ours_rows = []
 
     for sd_idx, sd in enumerate(studies_data):
         rows = [i for i, r in enumerate(all_rows) if r[0] == sd_idx]
         if not rows:
             continue
+        ours_rows.extend(i for i in rows if selected_mask[i])
 
-        # Models selected from the combined Pareto front that belong to this
-        # study, plotted at their test-set accuracy
-        sel_rows = [i for i in rows if selected_mask[i]]
-        if sel_rows:
-            xs = np.array([all_rows[i][1] for i in sel_rows])
-            ys = np.array([all_rows[i][2] for i in sel_rows])
-            ax.scatter(xs, ys, color=sd["color_par"], alpha=ALPHA_SELECTED,
-                       s=260, marker=MARKER_SELECTED, edgecolors="white",
-                       linewidths=1.2, zorder=4)
-            legend_elements.append(
-                Line2D([0], [0], marker=MARKER_SELECTED, color="w",
-                       markerfacecolor=sd["color_par"], markeredgecolor="white",
-                       markeredgewidth=0.6, markersize=9, linestyle="none"))
-            legend_labels.append(f"{sd['name']} (n={len(sel_rows)})")
+    if ours_rows:
+        xs = np.array([all_rows[i][1] for i in ours_rows])
+        ys = np.array([all_rows[i][2] for i in ours_rows])
+        order = np.argsort(xs)
+        if len(ours_rows) > 1:
+            ax.plot(xs[order], ys[order], color=OURS_COLOR,
+                    linewidth=1.8, alpha=0.85, zorder=2)
+        ax.scatter(xs, ys, color=OURS_COLOR, alpha=ALPHA_SELECTED,
+                   s=180, marker="D", edgecolors="white",
+                   linewidths=1.2, zorder=4)
+        legend_elements.append(
+            Line2D([0], [0], marker="D", color=OURS_COLOR,
+                   markerfacecolor=OURS_COLOR, markeredgecolor="white",
+                   markeredgewidth=0.6, markersize=8, linewidth=1.5))
+        legend_labels.append(f"Ours (n={len(ours_rows)})")
 
-    # ── Literature reference points (HAR studies only) ────────────────────
-    # Logarithmic x-axis: parameters span orders of magnitude.  Set before
-    # the literature annotations so get_xlim() below reflects log limits.
+    # ── Literature reference points ───────────────────────────────────────
     ax.set_xscale("log")
 
     lit_points = []
@@ -299,47 +305,52 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
                 lit_datasets.add(dataset)
                 lit_points += points
 
-    lit_handles = []
-    lit_labels = []
     if lit_points:
-        metrics_plotted = set()
+        families = {}
         for p in lit_points:
-            ax.scatter([p["params"]], [p["value"]], color=LIT_COLOR, s=160,
-                       marker=LIT_MARKERS.get(p["metric"], "o"), zorder=4,
-                       linewidths=1.2)
-        x0, x1 = ax.get_xlim()
-        for i, p in enumerate(lit_points):
-            # Annotate to the left for points on the right side of the plot,
-            # and alternate above/below, to reduce label collisions. The
-            # suffix carries the nuances from har-numbers-literature.md and
-            # kws-numbers-literature.md: F1-score (not accuracy), compute
-            # cost, and free-text notes.
-            right_side = p["params"] > np.sqrt(x0 * x1)
-            dx = -7 if right_side else 7
-            ha = "right" if right_side else "left"
-            dy = 7 if i % 2 == 0 else -13
-            if p["name"] in LIT_ANNOTATION_OFFSETS:
-                dx, dy, ha = LIT_ANNOTATION_OFFSETS[p["name"]]
-            parts = []
-            if p["metric"] == "f1":
-                parts.append("F1")
-            if p.get("note"):
-                parts.append(p["note"])
-            suffix = f" ({', '.join(parts)})" if parts else ""
-            ax.annotate(p["name"] + suffix, (p["params"], p["value"]),
-                        textcoords="offset points", xytext=(dx, dy), ha=ha,
-                        fontsize=LITERATURE_ANNOTATION_SIZE, color=LIT_COLOR,
-                        bbox=dict(facecolor="white", edgecolor="none", alpha=0.8,
-                                  pad=1.5), zorder=5)
-            metric = p["metric"]
-            if metric not in metrics_plotted:
-                metrics_plotted.add(metric)
-                lit_handles.append(
-                    Line2D([0], [0], marker=LIT_MARKERS.get(metric, "o"),
-                           color="w", markerfacecolor=LIT_COLOR,
-                           markeredgecolor=LIT_COLOR, markersize=12,
-                           linestyle="none", label=f"Literature ({metric})"))
-                lit_labels.append(f"Literature ({metric})")
+            families.setdefault(literature_group(p), []).append(p)
+        family_colors = {
+            family: LIT_COLORS[i % len(LIT_COLORS)]
+            for i, family in enumerate(families)
+        }
+        family_markers = {
+            family: MODEL_MARKERS[i % len(MODEL_MARKERS)]
+            for i, family in enumerate(families)
+        }
+
+        for family, points in families.items():
+            points = sorted(points, key=lambda p: p["params"])
+            color = family_colors[family]
+            if len(points) > 1:
+                ax.plot([p["params"] for p in points],
+                        [p["value"] for p in points], color=color,
+                        linewidth=1.5, alpha=0.8, zorder=2)
+            for p in points:
+                marker = family_markers[family]
+                filled = p["metric"] != "f1"
+                ax.scatter([p["params"]], [p["value"]], color=color,
+                           facecolors=color if filled else "none",
+                           edgecolors=color, s=95, marker=marker,
+                           linewidths=1.4, zorder=4)
+
+        # One entry per paper, while retaining all model names when a paper
+        # reports several variants.
+        papers = {}
+        for p in lit_points:
+            key = (p["source"], literature_group(p))
+            papers.setdefault(key, []).append(p)
+        for (source, family), points in papers.items():
+            names = "/".join(p["name"] for p in points)
+            metric = "F1" if all(p["metric"] == "f1" for p in points) else "accuracy"
+            notes = sorted({p["note"] for p in points if p.get("note")})
+            details = ", ".join([metric] + notes)
+            marker = family_markers[family]
+            color = family_colors[family]
+            legend_elements.append(
+                Line2D([0], [0], marker=marker, color=color,
+                       markerfacecolor="none" if metric == "F1" else color,
+                       markeredgecolor=color, markersize=7, linewidth=1.3))
+            legend_labels.append(f"{names} ({source}, {details})")
 
     ax.set_xlabel("Number of parameters", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(accuracy_label or f"{accuracy_field.replace('_', ' ')} (%)",
@@ -359,9 +370,11 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
     ax.set_ylim(lo - pad, hi + pad)
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=100.0))
 
-    ax.legend(handles=legend_elements + lit_handles,
-              labels=legend_labels + lit_labels,
-              framealpha=0.9, fontsize=LEGEND_SIZE,
-              borderpad=0.7, labelspacing=0.5)
+    ax.legend(handles=legend_elements, labels=legend_labels,
+              loc="upper center", bbox_to_anchor=(0.5, -0.15),
+              ncol=3, framealpha=0.95, fontsize=LEGEND_SIZE,
+              borderpad=0.7, labelspacing=0.65, columnspacing=1.0,
+              handletextpad=0.5)
+    fig.subplots_adjust(bottom=0.30)
 
-    savefig(fig, title, "param_accuracy", dpi=300)
+    savefig(fig, title, "param_accuracy", dpi=300, tight=False, tight_bbox=True)

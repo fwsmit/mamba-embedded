@@ -13,7 +13,7 @@ bidirectional_strategy: ew_multiply
 n_trials: 100
 quantization_precision: [8, 16]
 quantization_methods: [standard, strat-kl-tqt]
-plot_description: "Multi-layer bidirectional (mul)"
+plot_description: "Multi-layer bidirectional"
 
 SEARCH_SPACE:
   d_model:

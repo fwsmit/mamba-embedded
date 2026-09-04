@@ -64,7 +64,7 @@ python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mam
 python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mamba bidirectional (add) (HAR)" config/har/arch-mamba1-har-bidir.yaml
 python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mamba bidirectional (mul) (HAR)" config/har/arch-mamba1-har-bidir-mul.yaml
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (HAR)" config/har/*
-python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" config/kws/* config/kws-multi-layer/*
+python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" --par-acc-top auto config/kws/* config/kws-multi-layer/*
 
 # Per-subject contamination of the HAR validation split (reads the raw
 # UCI HAR dataset directly; config only resolves the title)

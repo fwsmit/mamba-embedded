@@ -15,7 +15,7 @@ MARKER_PAR = "D"
 
 ACCURACY_LABEL = "Accuracy on validation set"
 LATENCY_MCU_LABEL = "Latency on MCU (ms, lower is better)"
-LATENCY_PC_LABEL = "Latency on PC (μs, lower is better)"
+LATENCY_PC_LABEL = "Latency on PC ($\\mu$s, lower is better)"
 AXIS_LABEL_SIZE = 14
 TICK_LABEL_SIZE = 12
 
@@ -262,6 +262,13 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0):
     """
     n_studies = len(studies_data)
 
+    # Render all text with LaTeX so the figure matches the fonts of the LaTeX
+    # thesis it will be embedded in. helvet is loaded with the same scaling as
+    # the thesis (\usepackage[scaled=.92]{helvet}) so sans-serif text uses
+    # Helvetica instead of Computer Modern Sans.
+    plt.rcParams["text.usetex"] = True
+    plt.rcParams["text.latex.preamble"] = r"\usepackage[scaled=.92]{helvet}"
+
     fig1, ax = plt.subplots(figsize=(9, 6))
 
     # ── All trials (faint) ────────────────────────────────────────────────────
@@ -342,6 +349,8 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0):
     xlabel = LATENCY_MCU_LABEL if use_mcu else LATENCY_PC_LABEL
     ax.set_xlabel(xlabel, fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(ACCURACY_LABEL, fontsize=AXIS_LABEL_SIZE)
+
+    ax.tick_params(axis='both', which='major', labelsize=13)
 
     n_studies = len(studies_data)
     ax.grid(True, alpha=0.3, linestyle="--")
