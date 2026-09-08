@@ -7,7 +7,7 @@ This project trains **Mamba state-space models (SSMs)** and deploys them on **ES
 | Path | Purpose |
 |------|---------|
 | `train/` | PyTorch training, ONNX export, quantization |
-| `esp-dl/` | ESP-IDF project for ESP32-S3 inference |
+| `esp-dl/` | ESP-IDF project for ESP32-S3 inference. `main/app_main.cpp` is the default HAR measurement program; alternative programs live in `main/apps/<name>/` and are selected with `run-esp.sh --app <name>` |
 | `tools/` | ESP-DL operator compatibility checker |
 | `~/Models/` | Exported ONNX models |
 | `data/` | Datasets (HAR, SpeechCommands) |
@@ -20,6 +20,7 @@ To build the ESP-DL firmware with a given quantized model, flash it to the devic
 ```bash
 ./run-esp.sh path/to/model.espdl
 ./run-esp.sh -v path/to/model.espdl   # verbose: real-time build, flash & serial output
+./run-esp.sh --app demo path/to/model.espdl  # build a variant from main/apps/demo instead of the default app
 ```
 
 This script:
@@ -31,6 +32,15 @@ This script:
 5. Runs `idf.py flash` on `/dev/ttyACM0` (dataset partition is flashed automatically by the build system)
 6. Opens a serial monitor and waits for an inference result
 7. Returns exit code 0 on `INFERENCE_OK`, 1 on failure, 2 on crash. Add `-v` before the model path to see all build, flash, and serial output in real time (default is non-verbose, which only prints build/flash output on failure and buffers serial output until a sentinel is hit).
+
+### App variants
+
+The project supports multiple programs without duplicating the ESP-DL project: the active program is picked by a CMake cache entry (`ACTIVE_APP`, default `har`) that switches which sources the `main` component compiles.
+
+- `har` (default) — the original measurement program in `main/app_main.cpp`
+- any directory under `main/apps/<name>/` containing an `app_main.cpp` — e.g. `main/apps/demo/`, a demo that streams dataset predictions in a loop
+
+Select the variant with `./run-esp.sh --app <name> path/to/model.espdl` (or `--app=<name>`). The model/dataset copy, partition table, and the embedded `model.espdl` binary are shared by all variants; only the compiled `app_main.cpp` changes. To add a new variant, create `main/apps/<name>/app_main.cpp` — nothing else needs to change. An unknown `--app` value is rejected before any build happens. Each variant can also be built/flashed manually with `idf.py -D ACTIVE_APP=<name> build` / `idf.py -D ACTIVE_APP=<name> -p /dev/ttyACM0 flash`.
 
 ## Training a Model
 

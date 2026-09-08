@@ -1,6 +1,16 @@
-set(src_dirs        ./)
+set(ACTIVE_APP "har" CACHE STRING "App variant to build: 'har' (default) or a subdirectory of main/apps") 
 
-set(include_dirs    ./)
+if(ACTIVE_APP STREQUAL "har")
+    set(src_dirs        ./)
+
+    set(include_dirs    ./)
+elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/apps/${ACTIVE_APP}")
+    set(src_dirs        apps/${ACTIVE_APP})
+
+    set(include_dirs    ./ apps/${ACTIVE_APP})
+else()
+    message(FATAL_ERROR "Unknown ACTIVE_APP '${ACTIVE_APP}': expected 'har' or an existing directory under main/apps")
+endif()
 
 list(APPEND requires esp32_s3_eye_noglib
                       esp_lcd
