@@ -10,9 +10,9 @@ def create_profiling_plot(study_name, config_path, trial_number, title):
     """
     Vertical bar chart of MCU operator profiling for a specific trial.
 
-    Plots each operator type's total latency on the MCU, sorted descending,
-    with a second bar showing the count (scaled to max latency for visual
-    comparison). Annotations display exact values.
+    Plots each operator type's share of total MCU latency (%), sorted
+descending, with a second bar showing the count (scaled to max latency for
+visual comparison). Annotations display exact values.
 
     Parameters
     ----------
@@ -56,32 +56,33 @@ def create_profiling_plot(study_name, config_path, trial_number, title):
     op_names = [o[0] for o in ops]
     latencies = [o[1]["total_latency_ms"] for o in ops]
     counts = [o[1]["count"] for o in ops]
+    total = sum(latencies)
+    latency_pct = [l / total * 100 for l in latencies] if total else [0.0] * len(latencies)
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
     x = np.arange(len(op_names))
     width = 0.65
 
-    bars = ax.bar(x, latencies, width, color="#4C9BE8", edgecolor="white", zorder=3)
+    bars = ax.bar(x, latency_pct, width, color="#4C9BE8", edgecolor="white", zorder=3)
 
     ax.set_xticks(x)
-    ax.set_xticklabels(op_names, rotation=45, ha="right", fontsize=9)
-    ax.set_ylabel("Total Latency on MCU (ms)", fontsize=11)
+    ax.set_xticklabels(op_names, rotation=45, ha="right", fontsize=12)
+    ax.set_ylabel("Latency Contribution (%)", fontsize=13)
     ax.set_xlabel("Operator Type", fontsize=11)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
 
     # Add a bit of headroom
-    max_lat = max(latencies) if latencies else 1
-    ax.set_ylim(0, max_lat * 1.15)
+    max_pct = max(latency_pct) if latency_pct else 1
+    ax.set_ylim(0, max_pct * 1.15)
 
     # Also show total latency and average latency in a text box
-    total = sum(latencies)
     avg_per_op = total / len(latencies)
     info_text = f"Total: {total} µs  |  Avg/op: {avg_per_op:.0f} µs"
-    ax.text(0.98, 0.95, info_text, transform=ax.transAxes, fontsize=10,
-            ha="right", va="top", bbox=dict(boxstyle="round,pad=0.3",
-                                              facecolor="lightyellow",
-                                              edgecolor="gray", alpha=0.8))
+    # ax.text(0.98, 0.95, info_text, transform=ax.transAxes, fontsize=10,
+    #         ha="right", va="top", bbox=dict(boxstyle="round,pad=0.3",
+    #                                           facecolor="lightyellow",
+    #                                           edgecolor="gray", alpha=0.8))
 
     savefig(fig, title, "profiling")
     return True

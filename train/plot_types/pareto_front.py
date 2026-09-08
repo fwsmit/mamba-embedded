@@ -242,7 +242,7 @@ def create_mcu_pareto_plot(studies_data, title,
     savefig(fig, title, "muc_pareto")
 
 
-def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0):
+def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0, ylim=None, xlim=None):
     """
     Plot and save the Pareto front comparison figure for N studies.
 
@@ -259,6 +259,12 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0):
         Upper y-axis limit as a fraction (default 1.0 = 100%%). Pass None to
         frame the axis around the actual accuracy range of the trials instead
         of capping at 100%%.
+    ylim : tuple of float or None
+        Optional fixed y-axis range in percent (e.g. (84, 90)); overrides the
+        automatic axis framing computed above.
+    xlim : tuple of float or None
+        Optional fixed x-axis range in latency units (e.g. (0, 80) for PC µs);
+        overrides the automatic axis framing computed below.
     """
     n_studies = len(studies_data)
 
@@ -305,6 +311,8 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0):
         ax.set_ylim(bot, top)
     else:
         pass
+    if ylim is not None:
+        ax.set_ylim(ylim[0] / 100.0, ylim[1] / 100.0)
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
     ax.tick_params(axis="both", labelsize=TICK_LABEL_SIZE)
 
@@ -328,6 +336,8 @@ def create_pareto_front_plot(studies_data, title, use_mcu=False, top_acc=1.0):
         span = hi
         pad = span * 0.2 if span > 0 else 10.0
         ax.set_xlim(0, hi + pad)
+    if xlim is not None:
+        ax.set_xlim(xlim[0], xlim[1])
 
     # ── Extend each Pareto-front step line out to the right and bottom ────────
     for sd in studies_data:

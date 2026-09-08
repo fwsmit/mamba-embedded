@@ -22,9 +22,9 @@ from .common import savefig
 
 ALPHA_SELECTED = 0.95
 FIGSIZE = (10.5, 9.5)
-AXIS_LABEL_SIZE = 14
-TICK_LABEL_SIZE = 12
-LEGEND_SIZE = 9
+AXIS_LABEL_SIZE = 16
+TICK_LABEL_SIZE = 14
+LEGEND_SIZE = 14
 LIT_COLORS = plt.get_cmap("tab10").colors
 MODEL_MARKERS = ("o", "^", "s", "P", "v", "<", ">", "h", "p", "*", "X")
 OURS_COLOR = "#2E7D32"
@@ -44,34 +44,34 @@ OURS_COLOR = "#2E7D32"
 #   cost_unit : "MACs" or "FLOPs" (only meaningful with ``cost``)
 #   note      : optional free-text nuance (e.g. "average across datasets")
 HAR_LITERATURE_POINTS = [
-    dict(name="Novac et al.", params=3958, value=92.41, metric="accuracy",
+    dict(name="Novac et al.", params=3958, value=92.41, metric="",
          source="arXiv:2105.13331", group="Novac et al."),
-    dict(name="MicrobiconvLSTM", params=11400, value=93.41, metric="accuracy",
+    dict(name="MicrobiconvLSTM", params=11400, value=93.41, metric="",
          source="arXiv:2602.06523", group="MicrobiconvLSTM", cost=0.42, cost_unit="MACs",
          note="average"),
-    dict(name="Machar", params=67380, value=99.32, metric="accuracy",
+    dict(name="Machar", params=67380, value=99.32, metric="",
          source="arXiv:2602.06523", group="Machar", cost=10.37, cost_unit="MFLOPs"),
     dict(name="Crossover-BiDir-BabyMamba", params=27000, value=95.10,
          metric="f1", source="BabyMamba-HAR", group="BabyMamba-HAR",
          cost=2.21, cost_unit="MACs"),
-    dict(name="CI-BabyMamba-HAR", params=28000, value=85.80, metric="f1",
-         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=50.92,
-         cost_unit="MACs"),
     dict(name="TinyHAR", params=55000, value=96.53, metric="f1",
-         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=9.29,
+         source="BabyMamba-HAR", group="TinyHAR", cost=9.29,
          cost_unit="MACs"),
     dict(name="TinierHAR", params=33000, value=96.37, metric="f1",
-         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=1.73,
+         source="BabyMamba-HAR", group="TinierHAR", cost=1.73,
          cost_unit="MACs"),
     dict(name="DeepConvLSTM", params=136000, value=93.53, metric="f1",
-         source="BabyMamba-HAR", group="BabyMamba-HAR", cost=15.51,
+         source="BabyMamba-HAR", group="DeepConvLSTM", cost=15.51,
          cost_unit="MACs"),
-    dict(name="MambaLite-Micro", params=37100, value=92.7, metric="accuracy",
+    dict(name="MambaLite-Micro", params=37100, value=92.7, metric="",
          source="MambaLite-Micro", group="MambaLite-Micro", cost=123.4,
          cost_unit="ms"),
     dict(name="HARMamba", params=388300, value=97.01, metric="f1",
          source="HARMamba", group="HARMamba", cost=11.07,
          cost_unit="MFLOPs"),
+    # dict(name="CI-BabyMamba-HAR", params=28000, value=85.80, metric="f1",
+    #      source="BabyMamba-HAR", group="BabyMamba-HAR", cost=50.92,
+    #      cost_unit="MACs"),
 ]
 
 # Sources collected in kws-numbers-literature.md.  The LMU models report their
@@ -80,55 +80,60 @@ HAR_LITERATURE_POINTS = [
 # is noted in the legend.  `cost` carries each TinySpeech model's
 # compute in millions of Mult-Adds.
 KWS_LITERATURE_POINTS = [
-    dict(name="MambaLite-Micro", params=35978, value=92.5, metric="accuracy",
+    dict(name="MambaLite-Micro", params=35978, value=92.5, metric="",
          source="MambaLite-Micro", group="MambaLite-Micro", cost=1133.6,
          cost_unit="ms"),
-    dict(name="TinySpeech-X", params=10800, value=94.6, metric="accuracy",
+    dict(name="LMU-1", params=210375, value=96.9, metric="",
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
+    dict(name="LMU-2", params=45125, value=95.9, metric="",
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
+    dict(name="LMU-3", params=13125, value=95.0, metric="",
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
+    dict(name="LMU-4", params=6125, value=92.7, metric="",
+         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
+    dict(name="TinySpeech-X", params=10800, value=94.6, metric="dataset V1",
          source="arXiv:2008.04245", group="TinySpeech", cost=10.9,
          cost_unit="Mult-Adds"),
-    dict(name="TinySpeech-Y", params=6100, value=93.6, metric="accuracy",
+    dict(name="TinySpeech-Y", params=6100, value=93.6, metric="V1",
          source="arXiv:2008.04245", group="TinySpeech", cost=6.5,
          cost_unit="Mult-Adds"),
-    dict(name="TinySpeech-Z", params=2700, value=92.4, metric="accuracy",
+    dict(name="TinySpeech-Z", params=2700, value=92.4, metric="V1",
          source="arXiv:2008.04245", group="TinySpeech", cost=2.6,
          cost_unit="Mult-Adds"),
-    dict(name="LMU-1", params=210375, value=96.9, metric="accuracy",
-         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
-    dict(name="LMU-2", params=45125, value=95.9, metric="accuracy",
-         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
-    dict(name="LMU-3", params=13125, value=95.0, metric="accuracy",
-         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
-    dict(name="LMU-4", params=6125, value=92.7, metric="accuracy",
-         source="arXiv:2009.04465", group="LMU", note="model size, int8 params"),
-    # Further points from kws-numbers-literature-full-report.md.
-    dict(name="TinySpeech-M", params=4700, value=91.9, metric="accuracy",
-         source="arXiv:2008.04245", group="TinySpeech", cost=4.4,
-         cost_unit="Mult-Adds"),
-    dict(name="MicroCNN", params=4200, value=93.22, metric="accuracy",
-         source="arXiv:2511.07821", group="MicroCNN"),
-    dict(name="DS-CNN-S", params=4400, value=91.5, metric="accuracy",
-         source="ICASSP 2019", group="DS-CNN", cost=5.4,
-         cost_unit="Mult-Adds", note="~91-92%"),
-    dict(name="TC-ResNet8-0.25", params=5600, value=90.5, metric="accuracy",
-         source="InterSpeech 2019", group="TC-ResNet8-0.25"),
-    dict(name="Res8-narrow", params=20000, value=90.1, metric="accuracy",
-         source="InterSpeech 2019", group="Res8-narrow", cost=143.2,
-         cost_unit="Mult-Adds"),
-    dict(name="TENet-6-narrow", params=17000, value=96.0, metric="accuracy",
-         source="Interspeech 2020", group="TENet", cost=0.553,
-         cost_unit="Mult-Adds"),
-    dict(name="TKWS-3", params=14400, value=92.4, metric="accuracy",
+    # # Further points from kws-numbers-literature-full-report.md.
+    # dictdondon="TinySpeech-M", _iterparams=4699, value=91.9, metric="V1",
+    #      cost_unit="Mult-Adds"),
+    # dict(name="MicroCNN", params=4200, value=93.22, metric="",
+    #      source="arXiv:2511.07821", group="MicroCNN"),
+
+    #https://arxiv.org/pdf/1911.02086
+    dict(name="DS-CNN-S", params=39000, value=94.1, metric="dataset V1",
+         source="hello edge", group="DS-CNN"),
+    dict(name="DS-CNN-M", params=189000, value=94.9, metric="V1",
+         source="hello edge", group="DS-CNN"),
+    dict(name="DS-CNN-L", params=498000, value=95.4, metric="V1",
+         source="hello edge", group="DS-CNN"),
+
+    # dict(name="TC-ResNet8-0.25", params=5600, value=90.5, metric="",
+    #      source="InterSpeech 2019", group="TC-ResNet8-0.25"),
+    # dict(name="Res8-narrow", params=20000, value=90.1, metric="",
+    #      source="InterSpeech 2019", group="Res8-narrow", cost=143.2,
+    #      cost_unit="Mult-Adds"),
+    # dict(name="TENet-6-narrow", params=17000, value=96.0, metric="",
+    #      source="Interspeech 2020", group="TENet", cost=0.553,
+    #      cost_unit="Mult-Adds"),
+    dict(name="TKWS-3", params=14400, value=92.4, metric="F1",
          source="bartoliEndtoEndEfficiencyKeyword2025", group="TKWS"),
-    dict(name="TKWS-2", params=4600, value=88.8, metric="accuracy",
+    dict(name="TKWS-2", params=4600, value=88.8, metric="F1",
          source="bartoliEndtoEndEfficiencyKeyword2025", group="TKWS"),
-    dict(name="TENet6-N", params=17100, value=91.8, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025", group="TENet"),
-    dict(name="TENet6", params=54200, value=92.9, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025", group="TENet"),
-    dict(name="LicoNet-S", params=17400, value=93.6, metric="accuracy",
+    # dict(name="TENet6-N", params=17100, value=91.8, metric="F1",
+    #      source="bartoliEndtoEndEfficiencyKeyword2025", group="TENet"),
+    # dict(name="TENet6", params=54200, value=92.9, metric="F1",
+    #      source="bartoliEndtoEndEfficiencyKeyword2025", group="TENet"),
+    dict(name="LicoNet-S", params=17400, value=93.6, metric="F1",
          source="bartoliEndtoEndEfficiencyKeyword2025", group="LicoNet-S"),
-    dict(name="DS-CNN", params=46500, value=91.2, metric="accuracy",
-         source="bartoliEndtoEndEfficiencyKeyword2025", group="DS-CNN"),
+    # dict(name="DS-CNN", params=46500, value=91.2, metric="F1",
+    #      source="bartoliEndtoEndEfficiencyKeyword2025", group="DS-CNN"),
 ]
 
 
@@ -205,8 +210,8 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
     When any study targets the HAR or KWS dataset, reference points from the
     literature (see HAR_LITERATURE_POINTS / KWS_LITERATURE_POINTS) are
     overlaid with one marker shape per model family. Variants in a family are
-    connected by a line and all paper names are collected in the legend below
-    the plot.
+    connected by a line and collected under the family's group name in the
+    legend below the plot.
     """
     sel_field = selection_accuracy_field or accuracy_field
 
@@ -291,7 +296,7 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
             Line2D([0], [0], marker="D", color=OURS_COLOR,
                    markerfacecolor=OURS_COLOR, markeredgecolor="white",
                    markeredgewidth=0.6, markersize=8, linewidth=1.5))
-        legend_labels.append(f"Ours (n={len(ours_rows)})")
+        legend_labels.append(f"Ours")
 
     # ── Literature reference points ───────────────────────────────────────
     ax.set_xscale("log")
@@ -327,30 +332,37 @@ def create_param_accuracy_plot(studies_data, title, n_models=10,
                         linewidth=1.5, alpha=0.8, zorder=2)
             for p in points:
                 marker = family_markers[family]
-                filled = p["metric"] != "f1"
+                filled = p["metric"] == ""
                 ax.scatter([p["params"]], [p["value"]], color=color,
                            facecolors=color if filled else "none",
                            edgecolors=color, s=95, marker=marker,
                            linewidths=1.4, zorder=4)
 
-        # One entry per paper, while retaining all model names when a paper
-        # reports several variants.
+        # One entry per group, so a family with several variants is shown in
+        # the legend under its group name, and only a single-point paper
+        # keeps its model name.
         papers = {}
         for p in lit_points:
             key = (p["source"], literature_group(p))
             papers.setdefault(key, []).append(p)
         for (source, family), points in papers.items():
-            names = "/".join(p["name"] for p in points)
-            metric = "F1" if all(p["metric"] == "f1" for p in points) else "accuracy"
-            notes = sorted({p["note"] for p in points if p.get("note")})
-            details = ", ".join([metric] + notes)
+            name = family if len(points) > 1 else points[0]["name"]
+            metric = points[0]["metric"]
+            # notes = sorted({p["note"] for p in points if p.get("note")})
+            # details = ", ".join([metric] + notes)
             marker = family_markers[family]
             color = family_colors[family]
             legend_elements.append(
                 Line2D([0], [0], marker=marker, color=color,
-                       markerfacecolor="none" if metric == "F1" else color,
-                       markeredgecolor=color, markersize=7, linewidth=1.3))
-            legend_labels.append(f"{names} ({source}, {details})")
+                       markerfacecolor=color if metric == "" else "none",
+                       markersize=7,
+                       linestyle="None" if len(points) == 1 else "-",
+                       ))
+            if metric:
+                legend_labels.append(f"{name} ({metric})")
+            else:
+                legend_labels.append(f"{name}")
+
 
     ax.set_xlabel("Number of parameters", fontsize=AXIS_LABEL_SIZE)
     ax.set_ylabel(accuracy_label or f"{accuracy_field.replace('_', ' ')} (%)",

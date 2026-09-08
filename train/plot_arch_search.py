@@ -199,9 +199,14 @@ def main():
     )
     parser.add_argument(
         "--ylim", nargs=2, type=float, default=None, metavar=("LOW", "HIGH"),
-        help="Fix the y-axis range (used with --plot quantization_loss and "
-             "--plot val_test_gap). Pass the same values to comparable plots "
-             "(e.g. KWS and HAR) to keep their y-axes consistent."
+        help="Fix the y-axis range in percent (used with --plot quantization_loss, "
+             "--plot val_test_gap and --plot pareto). Pass the same values to "
+             "comparable plots (e.g. KWS and HAR) to keep their y-axes consistent."
+    )
+    parser.add_argument(
+        "--xlim", nargs=2, type=float, default=None, metavar=("LOW", "HIGH"),
+        help="Fix the x-axis range (used with --plot pareto). The x-axis is "
+             "latency (PC in µs, or MCU in ms with --use-mcu)."
     )
     parser.add_argument(
         "--use-param-size", action="store_true",
@@ -379,7 +384,8 @@ def main():
                 sd["par"] = par
 
         create_pareto_front_plot(studies_data, title, use_mcu=args.use_mcu,
-                                 top_acc=None if args.par_acc_top == "auto" else 1.0)
+                                 top_acc=None if args.par_acc_top == "auto" else 1.0,
+                                 ylim=args.ylim, xlim=args.xlim)
         plot_created = True
 
     elif args.plot == "scatter":

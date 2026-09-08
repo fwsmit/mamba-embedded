@@ -66,14 +66,17 @@ python -m train.plot_arch_search --plot accuracy --bar --title "Quantization Mam
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (HAR)" config/har/*
 python -m train.plot_arch_search --plot pareto --title "Pareto front comparison (KWS)" --par-acc-top auto config/kws/* config/kws-multi-layer/*
 
+python -m train.plot_arch_search --plot pareto --title "Pareto front comparison multi-layer (KWS)" --ylim 90 97 config/kws/arch-mamba1-kws-bidir-mul.yaml config/kws-multi-layer/* --show
+python -m train.plot_arch_search --plot pareto --title "Pareto front comparison Mamba-3 (KWS)" --ylim 88 96 --xlim 0 1250 config/kws/arch-mamba1-kws-2.yaml config/mamba-3/arch-mamba3-kws-bidir-mul.yaml config/kws/arch-mamba1-kws-bidir-mul.yaml
+
 # Per-subject contamination of the HAR validation split (reads the raw
 # UCI HAR dataset directly; config only resolves the title)
 python -m train.plot_arch_search --plot val_contamination --title "HAR validation contamination per subject" config/har/arch-mamba1-har.yaml
 
 # Compare parameter count with other studies
 python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/har/*
-# python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
 python -m train.plot_arch_search --plot param_accuracy --size 16 --quantization percent --n-models 5 --min-val-acc 85 config/kws/*
+# python -m train.plot_arch_search --plot param_accuracy --size 8 --quantization tqt --n-models 5 --min-val-acc 85 config/kws/*
 
 # Hyperparameter importance
 python -m train.plot_arch_search --plot importance config/har/* config/kws/* config/kws-multi-layer/*

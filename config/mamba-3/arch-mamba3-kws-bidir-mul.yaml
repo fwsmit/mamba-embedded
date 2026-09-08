@@ -13,7 +13,7 @@ bidirectional_strategy: ew_multiply
 n_trials: 149
 n_workers: 1
 quantization_precision: [8, 16]
-plot_description: "bidirectional (mul)"
+plot_description: "Mamba-3 bidirectional"
 
 SEARCH_SPACE:
   d_model:

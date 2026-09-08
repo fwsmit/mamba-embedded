@@ -8,9 +8,9 @@ from .common import savefig, beeswarm_box, LINTHRESH
 # mapping (blue/purple/green) is kept consistent across all plots; distinct
 # markers add a grayscale / colour-blind-safe secondary channel.
 STRATEGIES = [
-    ("8-bit (prc)",    "test_quantized_accuracy",       "#4C9BE8", "o"),
-    ("8-bit (kl-tqt)", "test_quantized_accuracy_strat", "#9C27B0", "s"),
-    ("16-bit (prc)",   "test_quantized_accuracy_int16", "#4CAF50", "^"),
+    ("8-bit PTQ",    "test_quantized_accuracy",       "#4C9BE8", "o"),
+    ("8-bit QAT", "test_quantized_accuracy_strat", "#9C27B0", "s"),
+    ("16-bit PTQ",   "test_quantized_accuracy_int16", "#4CAF50", "^"),
 ]
 
 
@@ -74,8 +74,8 @@ def create_quantization_loss_plot(studies_data, title, ylim=None):
     # ── Axes / labels ───────────────────────────────────────────────────────
     tick_labels = [f"{STRATEGIES[si][0]}" for si in present]
     ax.set_xticks([xs[si] for si in present])
-    ax.set_xticklabels(tick_labels, fontsize=11)
-    ax.set_ylabel("Quantization Loss (%pt, log)", fontsize=12)
+    ax.set_xticklabels(tick_labels, fontsize=13)
+    ax.set_ylabel("Quantization Loss (%, log)", fontsize=13)
     # Symlog would default to log-decade labels (10^0, 10^1 …); show plain
     # round numbers instead, limited to the visible range so no tick is clipped.
     vmax = ylim[1] if ylim is not None else ax.get_ylim()[1]

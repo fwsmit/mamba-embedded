@@ -231,6 +231,8 @@ The `results.json` file is a JSON array of objects, each with:
 
 When `quantization_methods` includes `strat-kl-tqt`, its metrics are stored under `_strat`-suffixed keys (e.g. `quantized_accuracy_strat`, `test_quantized_accuracy_strat`, `param_size_bytes_strat`), mirroring the `_int16` pattern, so methods can be compared for the same trials.
 
+To test whether one quantization method is statistically better than another, run pairwise Wilcoxon signed-rank tests (`tools/wilcoxon_test.py`) on the per-trial quantization loss (`float_accuracy - quantized_accuracy`), so every trial contributes a paired observation: int8 PTQ vs int16 PTQ, int8 PTQ vs int8 KL-TQT, and int16 PTQ vs int8 KL-TQT, reported for validation and test sets and grouped per dataset. Alongside the median paired difference, each row reports two robust magnitudes: the Hodges-Lehmann estimator (median of the pairwise averages, the shift estimate the Wilcoxon test is built on) and the IQR of the paired differences for spread. Since the float accuracy is identical for all three methods within a trial, testing raw accuracy ranks the methods identically. Trials where KL-TQT diverged (strat accuracy recorded as 0) are excluded by default (`--keep-diverged` to include them). To benchmark each method individually against the floating point model instead of pairwise, pass `--mode float`: it reports per method the per-trial accuracy drop (median, Hodges-Lehmann estimate and IQR of the deltas) plus a one-sample Wilcoxon test that the drop differs from zero.
+
 ## Best Models
 
 To list the n best models (ranked by a validation-based efficiency metric) across one or more studies, for a given quantization precision and method:
