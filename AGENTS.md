@@ -8,7 +8,7 @@ This project trains **Mamba state-space models (SSMs)** and deploys them on **ES
 |------|---------|
 | `train/` | PyTorch training, ONNX export, quantization |
 | `esp-dl/` | ESP-IDF project for ESP32-S3 inference. `main/app_main.cpp` is the default HAR measurement program; alternative programs live in `main/apps/<name>/` and are selected with `run-esp.sh --app <name>` |
-| `tools/` | ESP-DL operator compatibility checker |
+| `tools/` | ESP-DL operator compatibility checker; `tools/mfcc_test/` — MFCC round-trip test suite (waveform export, MCU runner, comparator) |
 | `~/Models/` | Exported ONNX models |
 | `data/` | Datasets (HAR, SpeechCommands) |
 | `run-esp.sh` | Copy an .espdl model, build, flash, and monitor the ESP-DL project |
@@ -38,9 +38,26 @@ This script:
 The project supports multiple programs without duplicating the ESP-DL project: the active program is picked by a CMake cache entry (`ACTIVE_APP`, default `har`) that switches which sources the `main` component compiles.
 
 - `har` (default) — the original measurement program in `main/app_main.cpp`
-- any directory under `main/apps/<name>/` containing an `app_main.cpp` — e.g. `main/apps/demo/`, a demo that streams dataset predictions in a loop
+- any directory under `main/apps/<name>/` containing an `app_main.cpp` — e.g. `main/apps/demo/`, an I2S microphone (INMP441) keyword-classifier demo that captures audio at 16 kHz (the Speech-Commands sample rate) and runs the embedded KWS model on the live MFCC features (see "I2S Microphone Demo Wiring" below)
+- `main/apps/accuracy/` — runs the first N dataset samples once and prints machine-readable `pred <class> <conf>` lines between `===PREDICTIONS_START===`/`===PREDICTIONS_END===` markers (host can score them against ground truth); prints `INFERENCE_OK` at the end. Note: dataset samples are read at a byte stride of `elements_per_sample × element_size`, so int16 datasets work
+- `main/apps/mfcc-test/` — MFCC round-trip test of the demo's `kws_mfcc()` without a microphone: an embedded 16000-sample Speech-Commands waveform is converted on-device and the 49×40 float32 features are printed between `===MFCC_START===`/`===MFCC_END===` markers, followed by a `DIAG` line comparing against the offline `test.pkl` reference (max/mean abs diff + how many of the 1960 int8 model inputs quantize differently) and `INFERENCE_OK`. Drive it from `tools/mfcc_test/`: `export_kws_waveform.py` rebuilds the int16 PCM + reference features for the chosen test index (default 0) and writes `pcm.h`/`ref.h`; `run_mfcc_test.sh` builds/flashes/monitors (reuses whatever `model.espdl` is in place, never flashes the dataset); `compare_mfcc.py <log>` scores a captured log. The same code can be sanity-checked on the host with `gcc tools/mfcc_test/host_main.c esp-dl/main/apps/mfcc-test/app_main.cpp esp-dl/main/apps/mfcc-test/mfcc_kws.c -Iesp-dl/main/apps/mfcc-test -lm`
 
 Select the variant with `./run-esp.sh --app <name> path/to/model.espdl` (or `--app=<name>`). The model/dataset copy, partition table, and the embedded `model.espdl` binary are shared by all variants; only the compiled `app_main.cpp` changes. To add a new variant, create `main/apps/<name>/app_main.cpp` — nothing else needs to change. An unknown `--app` value is rejected before any build happens. Each variant can also be built/flashed manually with `idf.py -D ACTIVE_APP=<name> build` / `idf.py -D ACTIVE_APP=<name> -p /dev/ttyACM0 flash`.
+
+The demo app does not wait for `INFERENCE_OK` (it classifies continuously), so it has a dedicated launcher that shows build, flash and serial output in real time: `./run-demo.sh path/to/kws-model.espdl` (a **KWS** model is required — it must be a Speech-Commands classifier, e.g. a trial from `experiments/mamba-1-kws-2/`; the demo extracts features on-device, so no dataset is needed). Because the demo never reads the dataset partition, `run-demo.sh` removes `dataset.bin` (a disposable copy from a previous run that `run-esp.sh` regenerates) before building so the 8 MB dataset is **not** flashed — otherwise every flash would re-upload it over serial, which is very slow. `run-demo.sh` builds incrementally (no-op if the demo app is already built), flashes to `/dev/ttyACM0` and monitors the serial console until interrupted (Ctrl+C); add `-q` to silence build/flash output (serial output is always streamed). On I2S init failure the demo prints `MIC_TEST_FAIL`, and on model/load issues `INFERENCE_FAIL`, which the script reports as failures. `./run-demo.py` (Python, same CLI: `./run-demo.py [-q] path/to/kws-model.espdl`) does the same and additionally opens a live dashboard window fed from the serial stream: the 24-sample waveform stamp, predicted keyword + confidence bar per 1 s block, an RMS level meter, a raw-logits strip (the app prints the pre-softmax output scores on a `logits ...` line; the strip highlights the argmax class), rolling history plots of prediction (color-coded per class), confidence, RMS and inference latency, and a minimum-confidence slider (0–100%) that gates whether the predicted keyword is shown — below the threshold the keyword label shows `…`, and the threshold itself is drawn as a tick on the confidence bar and a dashed line in the confidence history. It obtains the IDF environment via `activate_idf_v6.0.1.sh -e` without sourcing, and falls back to the identical text-only monitor when no display (or tkinter) is available. Equivalently, `./run-esp.sh -v --app demo path/to/model.espdl` also works but flashes the dataset wastefully (any model + dataset work — the demo ignores the dataset, but the script still copies it).
+
+### I2S Microphone Demo Wiring
+
+The demo (`main/apps/demo/`) configures the ESP32-S3-EYE as the I2S **master** on a 16 kHz (the Speech-Commands sample rate), 2×32-bit-slot bus and reports both slots. Every second of audio is converted to MFCC features exactly like the offline training pipeline (`train/kws_dataset_gen.py`; see `main/apps/demo/mfcc_kws.h`) and quantized to the model's input tensor before running the embedded KWS model — int8 models (input exponent −1) use `q = round(f·2)`, int16 models (e.g. exponent −9) use `q = round(f·512)`, both the PPQ formula `q = round(x/scale)` — so the demo needs a Speech-Commands classifier as `model.espdl`. The INMP441 is an I2S slave that transmits 24-bit samples MSB-justified in 32-bit words; the app shifts each word right by 8 bits. Connect (numbers are the `BSP_I2S_*` definitions in the BSP):
+
+| INMP441 | ESP32-S3-EYE | BSP macro |
+|---|---|---|
+| SCK | GPIO 41 | `BSP_I2S_SCLK` (BCLK, MCU-generated) |
+| WS | GPIO 42 | `BSP_I2S_LCLK` (word select, MCU-generated) |
+| SD | GPIO 2 | `BSP_I2S_DSIN` (serial data in) |
+| VDD | 3V3 | — |
+| GND | GND | — |
+| L/R | GND or 3V3 | — (selects which slot carries the data; both are read) |
 
 ## Training a Model
 

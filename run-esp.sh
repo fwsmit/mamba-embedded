@@ -2,24 +2,40 @@
 set -euo pipefail
 
 VERBOSE=false
+APP=har
 
-while getopts ":v" opt; do
-  case $opt in
-  v) VERBOSE=true ;;
-  \?)
-    echo "Usage: $0 [-v] <path-to-model.espdl>" >&2
+# Manual arg parsing: supports -v, --app <name>[/--app=<name>] and one positional model path
+POSITIONALS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+  -v) VERBOSE=true ; shift ;;
+  --app)
+    if [ $# -lt 2 ]; then
+      echo "Usage: $0 [-v] [--app <name>] <path-to-model.espdl>" >&2
+      exit 1
+    fi
+    APP="$2"
+    shift 2
+    ;;
+  --app=*) APP="${1#--app=}" ; shift ;;
+  -h|--help)
+    echo "Usage: $0 [-v] [--app <name>] <path-to-model.espdl>" >&2
+    exit 0
+    ;;
+  -*)
+    echo "Unknown option: $1" >&2
+    echo "Usage: $0 [-v] [--app <name>] <path-to-model.espdl>" >&2
     exit 1
     ;;
+  *) POSITIONALS+=("$1") ; shift ;;
   esac
 done
-shift $((OPTIND - 1))
 
-if [ $# -ne 1 ]; then
-  echo "Usage: $0 [-v] <path-to-model.espdl>" >&2
+if [ ${#POSITIONALS[@]} -ne 1 ]; then
+  echo "Usage: $0 [-v] [--app <name>] <path-to-model.espdl>" >&2
   exit 1
 fi
-
-MODEL_PATH="$1"
+MODEL_PATH="${POSITIONALS[0]}"
 
 if [ ! -f "$MODEL_PATH" ]; then
   echo "Error: model file not found: $MODEL_PATH" >&2
@@ -27,6 +43,13 @@ if [ ! -f "$MODEL_PATH" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Validate the app variant: 'har' is the embedded app in main/, anything else
+# must be a directory under main/apps/
+if [ "$APP" != "har" ] && [ ! -d "$SCRIPT_DIR/esp-dl/main/apps/$APP" ]; then
+  echo "Error: unknown app '$APP' (expected 'har' or a directory under esp-dl/main/apps/)" >&2
+  exit 1
+fi
 set +eu
 source ~/.espressif/tools/activate_idf_v6.0.1.sh >/dev/null
 set -eu
@@ -61,19 +84,22 @@ fi
 
 cd "$SCRIPT_DIR/esp-dl"
 
+# Pass the active app variant to cmake via the ACTIVE_APP cache entry
+APP_CMAKE_ARGS=(-D "ACTIVE_APP=$APP")
+
 if $VERBOSE; then
-  "$PYTHON" "$IDF_PY" build 2>&1 || exit 1
-  "$PYTHON" "$IDF_PY" -p /dev/ttyACM0 flash 2>&1 || exit 1
+  "$PYTHON" "$IDF_PY" "${APP_CMAKE_ARGS[@]}" build 2>&1 || exit 1
+  "$PYTHON" "$IDF_PY" "${APP_CMAKE_ARGS[@]}" -p /dev/ttyACM0 flash 2>&1 || exit 1
 else
   # Capture build output; only print on failure
-  BUILD_OUT=$("$PYTHON" "$IDF_PY" build 2>&1) || {
+  BUILD_OUT=$("$PYTHON" "$IDF_PY" "${APP_CMAKE_ARGS[@]}" build 2>&1) || {
     echo "$BUILD_OUT" | awk 'length < 300'
     exit 1
   }
 
   # Flash — surfaces errors instead of swallowing them.
   # dataset.bin (if present) is now auto-flashed via the CMake build system.
-  FLASH_OUT=$("$PYTHON" "$IDF_PY" -p /dev/ttyACM0 flash 2>&1) || {
+  FLASH_OUT=$("$PYTHON" "$IDF_PY" "${APP_CMAKE_ARGS[@]}" -p /dev/ttyACM0 flash 2>&1) || {
     echo "$FLASH_OUT" | awk 'length < 300'
     exit 1
   }
@@ -88,7 +114,7 @@ VERBOSE  = len(sys.argv) > 2 and sys.argv[2] == "true"
 BAUD     = 115200
 TIMEOUT_S = 3000
 OK_SENTINELS   = ["INFERENCE_OK"]
-FAIL_SENTINELS = ["INFERENCE_OOM", "INFERENCE_FAIL"]
+FAIL_SENTINELS = ["INFERENCE_OOM", "INFERENCE_FAIL", "MIC_TEST_FAIL"]
 CRASH_MARKERS  = ["Guru Meditation Error", "abort() was called", "Backtrace:", "rst:0x"]
 
 exit_code = 3
