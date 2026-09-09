@@ -1,16 +1,61 @@
+/*
+ * I2S microphone demo for the ESP32-S3-EYE: live Speech-Commands keyword
+ * classification with the embedded model.espdl (a KWS model, e.g.
+ * demo.espdl / experiments/mamba-1-kws-2 trial-55 espdl).
+ *
+ * The mic is captured at 16 kHz (the same sample rate the Speech-Commands
+ * dataset was recorded at; the INMP441 supports 16 kHz) and each second of
+ * audio is converted to MFCC features with the exact same processing as the
+ * offline dataset (train/kws_dataset_gen.py): torchaudio-style MFCC with
+ * n_fft=640 (40 ms), hop_length=320 (20 ms), n_mels=40, center=false,
+ * power=2.0, log_mels=true, f_min=0, f_max=8000, followed by PPQ int8
+ * quantization (q = clamp(round(x * 2))) matching dataset-trial-*.bin and
+ * the model's input tensor (scale 2^-9). See mfcc_kws.c for the port.
+ *
+ * The 12 output classes are the dataset's label order:
+ *   down go left no off on right stop up yes silence unknown
+ *
+ * Wiring (INMP441 pin on the left, ESP32-S3-EYE GPIO on the right; pin
+ * numbers are the BSP_I2S_* definitions in bsp/esp32_s3_eye.h):
+ *
+ *   INMP441              ESP32-S3-EYE
+ *   -------              -------------
+ *   SCK      <---------  GPIO 41   (BCLK, driven by the MCU)
+ *   WS       <---------  GPIO 42   (word select, driven by the MCU)
+ *   SD       --------->  GPIO 2    (serial data, 24-bit audio in 32-bit words)
+ *   VDD      <---------  3V3
+ *   GND      <---------  GND
+ *   L/R      <---------  GND or 3V3
+ *   (L/R selects which I2S slot carries the data; both slots are read and
+ *    the louder one is used, so either position works)
+ *
+ * Every ~1 s the app prints the active-channel mic stats, the recognised
+ * keyword and softmax confidence, and the raw (pre-softmax) output logits.
+ */
+
 #include "dl_model_base.hpp"
 #include "esp_log.h"
-#include "esp_partition.h"
-#include "esp_task_wdt.h"
 #include "esp_timer.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include <cstring>
-#include <vector>
+#include "bsp/esp32_s3_eye.h"
+#include "esp_codec_dev.h"
+#include "mfcc_kws.h"
 
-const char *TAG = "mamba_demo";
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+const char *TAG = "kws_demo";
+
+#define SAMPLE_RATE_HZ 16000 /* Speech-Commands sample rate */
+#define FRAME_BYTES    8     /* 2 channels x 32-bit I2S slots */
+#define BLOCK_BYTES    (KWS_CLIP_SAMPLES * FRAME_BYTES) /* 128000 = 1 s */
+#define FULL_SCALE     8388607.0 /* 2^23 - 1 (24-bit audio in 32-bit word) */
+
+#define WAVE_SAMPLES 24
 
 //
 // Embedded model binary symbols
@@ -18,137 +63,125 @@ const char *TAG = "mamba_demo";
 extern const uint8_t model_espdl_start[] asm("_binary_model_espdl_start");
 extern const uint8_t model_espdl_end[] asm("_binary_model_espdl_end");
 
-// ---------------------------------------------------------------------------
-// Model lifecycle
-// ---------------------------------------------------------------------------
+//
+// Speech-Commands label order (kws_dataset_gen.ALL_LABELS)
+//
+static const char *KWS_LABELS[12] = {
+    "down", "go",   "left",  "no",   "off",  "on",
+    "right", "stop", "up",    "yes",  "silence", "unknown",
+};
+
+static uint8_t raw_buf[BLOCK_BYTES];
+static int16_t ch_l[KWS_CLIP_SAMPLES];
+static int16_t ch_r[KWS_CLIP_SAMPLES];
+static float feats[KWS_N_FRAMES * KWS_N_MFCC];
+static int8_t quant[KWS_N_FRAMES * KWS_N_MFCC];
+static int16_t quant16[KWS_N_FRAMES * KWS_N_MFCC];
+
+static void wave_stamp(const int16_t *ch, char *out) {
+  for (int i = 0; i < WAVE_SAMPLES; ++i) {
+    int v = (int)ch[i] * WAVE_SAMPLES / 32767;
+    if (v < -WAVE_SAMPLES) v = -WAVE_SAMPLES;
+    if (v > WAVE_SAMPLES) v = WAVE_SAMPLES;
+    out[i] = (v >= 0) ? (char)('0' + v) : (char)('A' - v - 1);
+  }
+  out[WAVE_SAMPLES] = '\0';
+}
 
 static dl::Model *load_model(void) {
   auto *model = new dl::Model((const char *)model_espdl_start,
                               (size_t)(model_espdl_end - model_espdl_start));
   ESP_LOGI(TAG, "Model loaded");
-
-  auto &inputs = model->get_inputs();
-  bool is_float =
-      inputs.empty() || inputs.begin()->second->get_dtype() == dl::DATA_TYPE_FLOAT;
-  if (is_float) {
-    ESP_LOGI(TAG, "Float model detected, skipping model test");
-  } else {
-    esp_err_t test_err = model->test();
-    if (test_err != ESP_OK) {
-      ESP_LOGW(TAG, "Model test failed with error 0x%x: %s", test_err,
-               esp_err_to_name(test_err));
-    }
-    ESP_LOGI(TAG, "Model tested");
-  }
-
+  /* model->test() is skipped: the .espdl has no embedded test outputs. */
   return model;
 }
 
-// ---------------------------------------------------------------------------
-// Dataset loading (from partition)
-// ---------------------------------------------------------------------------
-
-struct Dataset {
-  const uint8_t *data; // start of sample data (after 8-byte header)
-  uint32_t num_samples;
-  uint32_t elements_per_sample;
-  esp_partition_mmap_handle_t map_handle;
-};
-
-static bool load_dataset(Dataset *ds) {
-  const esp_partition_t *part = esp_partition_find_first(
-      ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_UNDEFINED, "dataset");
-  if (!part) {
-    ESP_LOGI(TAG, "No dataset partition found");
-    return false;
-  }
-  ESP_LOGI(TAG, "Dataset partition found at 0x%x, size %lu bytes",
-           part->address, (unsigned long)part->size);
-
-  const void *map_ptr;
-  esp_partition_mmap_handle_t map_handle;
-  esp_err_t err = esp_partition_mmap(
-      part, 0, part->size, ESP_PARTITION_MMAP_DATA, &map_ptr, &map_handle);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to mmap dataset partition: 0x%x", err);
-    return false;
-  }
-
-  const uint8_t *bytes = (const uint8_t *)map_ptr;
-  ds->num_samples = *(const uint32_t *)bytes;
-  ds->elements_per_sample = *(const uint32_t *)(bytes + 4);
-  ds->data = bytes + 8;
-  ds->map_handle = map_handle;
-
-  ESP_LOGI(TAG, "Dataset: %lu samples, %lu elements per sample",
-           (unsigned long)ds->num_samples,
-           (unsigned long)ds->elements_per_sample);
-
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// Output decoding
-// ---------------------------------------------------------------------------
-
-static int find_argmax(const float *scores, int num_classes) {
-  int idx = 0;
-  float best = scores[0];
-  for (int i = 1; i < num_classes; ++i) {
-    if (scores[i] > best) {
-      best = scores[i];
-      idx = i;
-    }
-  }
-  return idx;
-}
-
-static bool predict(dl::Model *model, dl::TensorBase *input_tensor,
-                    dl::TensorBase *output_tensor,
-                    const std::vector<int> &input_shape, int input_exponent,
-                    dl::dtype_t input_dtype, const void *sample_ptr,
-                    int num_classes, int *predicted, float *confidence) {
-  input_tensor->assign(input_shape, sample_ptr, input_exponent, input_dtype);
-  model->run();
-
-  int exponent = output_tensor->get_exponent();
+static bool dequantize_scores(dl::TensorBase *output, float *scores,
+                              int num_classes) {
+  int exponent = output->get_exponent();
   float scale = (exponent > 0) ? (float)(1 << exponent)
                                : (1.0f / (float)(1 << -exponent));
 
-  float scores[16] = {0.0f}; // supports up to 16 classes
-  if (num_classes > 16) {
-    ESP_LOGE(TAG, "Too many classes: %d", num_classes);
-    return false;
-  }
-
-  if (output_tensor->get_dtype() == dl::DATA_TYPE_INT8) {
-    int8_t *raw = (int8_t *)output_tensor->data;
+  if (output->get_dtype() == dl::DATA_TYPE_INT8) {
+    int8_t *raw = (int8_t *)output->data;
     for (int i = 0; i < num_classes; ++i)
       scores[i] = (float)raw[i] * scale;
-  } else if (output_tensor->get_dtype() == dl::DATA_TYPE_FLOAT) {
-    float *raw = (float *)output_tensor->data;
+    return true;
+  } else if (output->get_dtype() == dl::DATA_TYPE_INT16) {
+    int16_t *raw = (int16_t *)output->data;
+    for (int i = 0; i < num_classes; ++i)
+      scores[i] = (float)raw[i] * scale;
+    return true;
+  } else if (output->get_dtype() == dl::DATA_TYPE_FLOAT) {
+    float *raw = (float *)output->data;
     for (int i = 0; i < num_classes; ++i)
       scores[i] = raw[i];
-  } else {
-    ESP_LOGE(TAG, "Unsupported output dtype: %s",
-             output_tensor->get_dtype_string());
-    return false;
+    return true;
   }
-
-  *predicted = find_argmax(scores, num_classes);
-  *confidence = scores[*predicted];
-  return true;
+  ESP_LOGE(TAG, "Unsupported output dtype: %s", output->get_dtype_string());
+  return false;
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
 extern "C" void app_main(void) {
-  ESP_LOGI(TAG, "Starting demo");
+  ESP_LOGI(TAG, "=== I2S keyword classifier demo ===");
+  ESP_LOGI(TAG, "pins: BCLK->INMP441.SCK (GPIO %d), WS->INMP441.WS (GPIO %d), "
+                "INMP441.SD->DATA-IN (GPIO %d)",
+           (int)BSP_I2S_SCLK, (int)BSP_I2S_LCLK, (int)BSP_I2S_DSIN);
+  ESP_LOGI(TAG, "config: %d Hz, 2x32-bit slots (24-bit audio, MSB-justified)",
+           SAMPLE_RATE_HZ);
 
+  i2s_std_config_t mic_cfg = {
+      .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE_HZ),
+      .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT,
+                                                      I2S_SLOT_MODE_STEREO),
+      .gpio_cfg =
+          {
+              .mclk = BSP_I2S_MCLK,
+              .bclk = BSP_I2S_SCLK,
+              .ws = BSP_I2S_LCLK,
+              .dout = BSP_I2S_DOUT,
+              .din = BSP_I2S_DSIN,
+              .invert_flags =
+                  {
+                      .mclk_inv = false,
+                      .bclk_inv = false,
+                      .ws_inv = false,
+                  },
+          },
+  };
+
+  esp_err_t init_ret = bsp_audio_init(&mic_cfg);
+  if (init_ret != ESP_OK) {
+    ESP_LOGE(TAG, "bsp_audio_init failed: 0x%x", init_ret);
+    printf("MIC_TEST_FAIL\n");
+    return;
+  }
+
+  esp_codec_dev_handle_t mic = bsp_audio_codec_microphone_init();
+  if (mic == NULL) {
+    ESP_LOGE(TAG, "bsp_audio_codec_microphone_init failed");
+    printf("MIC_TEST_FAIL\n");
+    return;
+  }
+
+  esp_codec_dev_sample_info_t fs = {
+      .bits_per_sample = 32,
+      .channel = 2, /* capture both I2S slots */
+      .channel_mask = ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0) |
+                      ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1),
+      .sample_rate = SAMPLE_RATE_HZ,
+      .mclk_multiple = 0,
+  };
+  if (esp_codec_dev_open(mic, &fs) != ESP_CODEC_DEV_OK) {
+    ESP_LOGE(TAG, "esp_codec_dev_open failed");
+    printf("MIC_TEST_FAIL\n");
+    return;
+  }
+
+  //
+  // Load model from embedded binary and wire up input / output tensors
+  //
   dl::Model *model = load_model();
-
   model->get_fbs_model()->load_map();
   auto &graph_inputs = model->get_inputs();
   auto &graph_outputs = model->get_outputs();
@@ -156,7 +189,6 @@ extern "C" void app_main(void) {
   if (graph_inputs.empty() || graph_outputs.empty()) {
     ESP_LOGE(TAG, "Model failed to load: no inputs or outputs registered");
     printf("INFERENCE_FAIL\n");
-    delete model;
     return;
   }
 
@@ -174,52 +206,129 @@ extern "C" void app_main(void) {
            input_tensor->get_dtype_string());
   ESP_LOGI(TAG, "Model output classes: %d", num_classes);
 
-  Dataset ds;
-  if (!load_dataset(&ds) || ds.num_samples == 0) {
-    ESP_LOGE(TAG, "No dataset available");
+  if (num_classes < 1 || num_classes > 12) {
+    ESP_LOGE(TAG, "Unexpected class count: %d (demo supports 1..12)", num_classes);
     printf("INFERENCE_FAIL\n");
-    delete model;
     return;
   }
 
-  // Warm-up + average single-inference latency, printed once as a demo stat
-  input_tensor->assign(input_shape, ds.data, input_exponent, input_dtype);
-  model->run();
-  int64_t total_us = 0;
-  const int num_runs = 10;
-  for (int i = 0; i < num_runs; ++i) {
-    int64_t t_start = esp_timer_get_time();
-    model->run();
-    total_us += esp_timer_get_time() - t_start;
-  }
-  ESP_LOGI(TAG, "Average single-inference latency: %.1f us (%.3f ms)",
-           (float)total_us / (float)num_runs,
-           (float)total_us / (float)num_runs / 1000.0f);
+  float scores[12];
+  bool first_block = true;
 
-  //
-  // Demo loop: stream predictions over the dataset, forever.
-  //
-  const int delay_ms = 500;
-  uint32_t n = ds.num_samples;
-  for (uint32_t pass = 1;; ++pass) {
-    printf("=== Demo pass %lu, %lu samples ===\n", (unsigned long)pass,
-           (unsigned long)n);
-    for (uint32_t i = 0; i < n; ++i) {
-      int predicted;
-      float confidence;
-      const void *sample_ptr = ds.data + i * ds.elements_per_sample;
-      if (!predict(model, input_tensor, output_tensor, input_shape,
-                   input_exponent, input_dtype, sample_ptr, num_classes,
-                   &predicted, &confidence)) {
-        ESP_LOGE(TAG, "Prediction failed on sample %lu", (unsigned long)i);
-        continue;
-      }
-      printf("sample %4lu/%lu -> class %d (conf %.3f)\n", (unsigned long)i + 1,
-             (unsigned long)n, predicted, confidence);
-      vTaskDelay(delay_ms / portTICK_PERIOD_MS);
+  for (uint32_t block = 1;; ++block) {
+    if (esp_codec_dev_read(mic, raw_buf, BLOCK_BYTES) != ESP_CODEC_DEV_OK) {
+      ESP_LOGW(TAG, "read failed (timeout?) - mic connected and powered?");
+      vTaskDelay(50 / portTICK_PERIOD_MS);
+      continue;
     }
-    if (pass == 1) {
-      printf("INFERENCE_OK\n"); // integrate with run-esp.sh
+    if (first_block) { /* discard stale pre-startup data */
+      first_block = false;
+      continue;
+    }
+
+    //
+    // Decode both 24-bit slots (MSB-justified in 32-bit words) to int16 PCM
+    //
+    int64_t sum_sq_l = 0, sum_sq_r = 0;
+    int32_t pk_min_l = 0, pk_max_l = 0, pk_min_r = 0, pk_max_r = 0;
+    for (int i = 0; i < KWS_CLIP_SAMPLES; ++i) {
+      const uint8_t *p = raw_buf + (size_t)i * FRAME_BYTES;
+      int32_t wl = (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                             ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
+      int32_t wr = (int32_t)((uint32_t)p[4] | ((uint32_t)p[5] << 8) |
+                             ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24));
+      int32_t sl = wl >> 8; /* 24-bit audio, MSB-justified in the word */
+      int32_t sr = wr >> 8;
+      ch_l[i] = (int16_t)sl;
+      ch_r[i] = (int16_t)sr;
+      sum_sq_l += (int64_t)sl * sl;
+      sum_sq_r += (int64_t)sr * sr;
+      if (sl < pk_min_l) pk_min_l = sl;
+      if (sl > pk_max_l) pk_max_l = sl;
+      if (sr < pk_min_r) pk_min_r = sr;
+      if (sr > pk_max_r) pk_max_r = sr;
+    }
+
+    /* The INMP441 transmits on only one slot; use the louder one. */
+    bool active_r = sum_sq_r > sum_sq_l;
+    const int16_t *pcm = active_r ? ch_r : ch_l;
+    const int32_t *pk_min = active_r ? &pk_min_r : &pk_min_l;
+    const int32_t *pk_max = active_r ? &pk_max_r : &pk_max_l;
+
+    //
+    // Extract MFCC features exactly like the offline Speech-Commands
+    // pipeline, then quantize to the model's input scale. The input tensor
+    // width follows the quantization method: int8 models (PPQ scale 0.5,
+    // exponent -1) use q = round(f * 2); int16 models (e.g. exponent -9)
+    // use q = round(f * 2^-exponent) = round(f * 512). Both are the PPQ
+    // formula q = clip(round(x / scale - offset)) with offset 0.
+    //
+    kws_mfcc(pcm, feats);
+    if (input_dtype == dl::DATA_TYPE_INT16) {
+      float scale = (input_exponent > 0)
+                        ? (float)(1 << input_exponent)
+                        : (1.0f / (float)(1 << -input_exponent));
+      float inv_scale = 1.0f / scale;
+      for (int i = 0; i < KWS_N_FRAMES * KWS_N_MFCC; ++i) {
+        float v = feats[i] * inv_scale;
+        if (v > 32767.0f) v = 32767.0f;
+        if (v < -32768.0f) v = -32768.0f;
+        quant16[i] = (int16_t)roundf(v);
+      }
+      input_tensor->assign(input_shape, quant16, input_exponent, input_dtype);
+    } else {
+      kws_mfcc_quantize(feats, quant);
+      input_tensor->assign(input_shape, quant, input_exponent, input_dtype);
+    }
+
+    int64_t t0 = esp_timer_get_time();
+    model->run();
+    float latency_ms = (float)(esp_timer_get_time() - t0) / 1000.0f;
+
+    int predicted = -1;
+    if (dequantize_scores(output_tensor, scores, num_classes)) {
+      float best = scores[0];
+      predicted = 0;
+      for (int k = 1; k < num_classes; ++k) {
+        if (scores[k] > best) {
+          best = scores[k];
+          predicted = k;
+        }
+      }
+    }
+
+    /* Softmax confidence over the raw scores. */
+    float conf = -1.0f;
+    if (predicted >= 0) {
+      float mx = scores[0], sum = 0.0f;
+      for (int k = 1; k < num_classes; ++k)
+        if (scores[k] > mx) mx = scores[k];
+      for (int k = 0; k < num_classes; ++k)
+        sum += expf(scores[k] - mx);
+      conf = expf(scores[predicted] - mx) / sum;
+    }
+
+    double rms = sqrt((double)sum_sq_l);
+    if (active_r) rms = sqrt((double)sum_sq_r);
+    char wave[WAVE_SAMPLES + 1];
+    wave_stamp(pcm, wave);
+    printf("=== KWS block %lu (%.3f s, %d frames) ===\n",
+           (unsigned long)block, (double)KWS_CLIP_SAMPLES / SAMPLE_RATE_HZ,
+           KWS_N_FRAMES);
+    printf("active %s | rms %7.1f dBFS | peak %+5.1f/%5.1f dBFS | wave %s\n",
+           active_r ? "R" : "L",
+           (rms > 0.0) ? 20.0 * log10(rms / FULL_SCALE) : -INFINITY,
+           20.0 * log10((double)(-(*pk_min)) / FULL_SCALE),
+           20.0 * log10((double)(*pk_max) / FULL_SCALE), wave);
+    printf("pred %d %-7s | conf %.2f | latency %.1f ms\n", predicted,
+           predicted >= 0 ? KWS_LABELS[predicted] : "?", conf, latency_ms);
+    /* Raw (pre-softmax) output scores so the host can tune its own
+     * minimum-confidence gate without reflashing. */
+    if (predicted >= 0) {
+      printf("logits");
+      for (int k = 0; k < num_classes; ++k)
+        printf(" %+.2f", scores[k]);
+      printf("\n");
     }
   }
 }
