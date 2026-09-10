@@ -29,8 +29,10 @@
  *   (L/R selects which I2S slot carries the data; both slots are read and
  *    the louder one is used, so either position works)
  *
- * Every ~1 s the app prints the active-channel mic stats, the recognised
- * keyword and softmax confidence, and the raw (pre-softmax) output logits.
+ * Mic stats (active channel, RMS, peak, waveform stamp) are printed at 10 Hz,
+ * once per 100 ms chunk of audio. Every 1 s (10 chunks) the accumulated clip
+ * is converted to MFCC features and classified: the recognised keyword,
+ * softmax confidence and raw (pre-softmax) output logits are printed.
  */
 
 #include "dl_model_base.hpp"
@@ -52,7 +54,9 @@ const char *TAG = "kws_demo";
 
 #define SAMPLE_RATE_HZ 16000 /* Speech-Commands sample rate */
 #define FRAME_BYTES    8     /* 2 channels x 32-bit I2S slots */
-#define BLOCK_BYTES    (KWS_CLIP_SAMPLES * FRAME_BYTES) /* 128000 = 1 s */
+#define BLOCK_CHUNKS   10    /* 1 s block = 10 x 100 ms chunks */
+#define CHUNK_SAMPLES  (KWS_CLIP_SAMPLES / BLOCK_CHUNKS)
+#define CHUNK_BYTES    (CHUNK_SAMPLES * FRAME_BYTES) /* 12800 = 100 ms */
 #define FULL_SCALE     8388607.0 /* 2^23 - 1 (24-bit audio in 32-bit word) */
 
 #define WAVE_SAMPLES 24
@@ -71,7 +75,7 @@ static const char *KWS_LABELS[12] = {
     "right", "stop", "up",    "yes",  "silence", "unknown",
 };
 
-static uint8_t raw_buf[BLOCK_BYTES];
+static uint8_t raw_buf[CHUNK_BYTES];
 static int16_t ch_l[KWS_CLIP_SAMPLES];
 static int16_t ch_r[KWS_CLIP_SAMPLES];
 static float feats[KWS_N_FRAMES * KWS_N_MFCC];
@@ -216,44 +220,77 @@ extern "C" void app_main(void) {
   bool first_block = true;
 
   for (uint32_t block = 1;; ++block) {
-    if (esp_codec_dev_read(mic, raw_buf, BLOCK_BYTES) != ESP_CODEC_DEV_OK) {
-      ESP_LOGW(TAG, "read failed (timeout?) - mic connected and powered?");
+    int64_t sum_sq_l = 0, sum_sq_r = 0;
+    int32_t pk_min_l = 0, pk_max_l = 0, pk_min_r = 0, pk_max_r = 0;
+    bool read_ok = true;
+
+    for (int chunk = 0; chunk < BLOCK_CHUNKS && read_ok; ++chunk) {
+      if (esp_codec_dev_read(mic, raw_buf, CHUNK_BYTES) != ESP_CODEC_DEV_OK) {
+        ESP_LOGW(TAG, "read failed (timeout?) - mic connected and powered?");
+        read_ok = false;
+        break;
+      }
+
+      //
+      // Decode both 24-bit slots (MSB-justified in 32-bit words) to int16 PCM
+      //
+      const size_t off = (size_t)chunk * CHUNK_SAMPLES;
+      int16_t *dst_l = ch_l + off;
+      int16_t *dst_r = ch_r + off;
+      int64_t chunk_sq_l = 0, chunk_sq_r = 0;
+      int32_t cmin_l = 0, cmax_l = 0, cmin_r = 0, cmax_r = 0;
+      for (int i = 0; i < CHUNK_SAMPLES; ++i) {
+        const uint8_t *p = raw_buf + (size_t)i * FRAME_BYTES;
+        int32_t wl = (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                               ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
+        int32_t wr = (int32_t)((uint32_t)p[4] | ((uint32_t)p[5] << 8) |
+                               ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24));
+        int32_t sl = wl >> 8; /* 24-bit audio, MSB-justified in the word */
+        int32_t sr = wr >> 8;
+        dst_l[i] = (int16_t)(sl >> 8);
+        dst_r[i] = (int16_t)(sr >> 8);
+        chunk_sq_l += (int64_t)sl * sl;
+        chunk_sq_r += (int64_t)sr * sr;
+        if (sl < cmin_l) cmin_l = sl;
+        if (sl > cmax_l) cmax_l = sl;
+        if (sr < cmin_r) cmin_r = sr;
+        if (sr > cmax_r) cmax_r = sr;
+      }
+      sum_sq_l += chunk_sq_l;
+      sum_sq_r += chunk_sq_r;
+      if (cmin_l < pk_min_l) pk_min_l = cmin_l;
+      if (cmax_l > pk_max_l) pk_max_l = cmax_l;
+      if (cmin_r < pk_min_r) pk_min_r = cmin_r;
+      if (cmax_r > pk_max_r) pk_max_r = cmax_r;
+
+      if (first_block) continue; /* discard stale pre-startup data, no stats */
+
+      /* 10 Hz mic stats over this 100 ms chunk (same line format as the
+       * old 1 Hz stats so the host dashboard parses it unchanged). */
+      bool chunk_r = chunk_sq_r > chunk_sq_l;
+      double chunk_rms =
+          sqrt((double)(chunk_r ? chunk_sq_r : chunk_sq_l));
+      char wave[WAVE_SAMPLES + 1];
+      wave_stamp(chunk_r ? dst_r : dst_l, wave);
+      printf("active %s | rms %7.1f dBFS | peak %+5.1f/%5.1f dBFS | wave %s\n",
+             chunk_r ? "R" : "L",
+             (chunk_rms > 0.0) ? 20.0 * log10(chunk_rms / FULL_SCALE) : -INFINITY,
+             20.0 * log10((double)(-(chunk_r ? cmin_r : cmin_l)) / FULL_SCALE),
+             20.0 * log10((double)(chunk_r ? cmax_r : cmax_l) / FULL_SCALE), wave);
+    }
+
+    if (!read_ok) {
       vTaskDelay(50 / portTICK_PERIOD_MS);
       continue;
     }
-    if (first_block) { /* discard stale pre-startup data */
+    if (first_block) {
       first_block = false;
       continue;
-    }
-
-    //
-    // Decode both 24-bit slots (MSB-justified in 32-bit words) to int16 PCM
-    //
-    int64_t sum_sq_l = 0, sum_sq_r = 0;
-    int32_t pk_min_l = 0, pk_max_l = 0, pk_min_r = 0, pk_max_r = 0;
-    for (int i = 0; i < KWS_CLIP_SAMPLES; ++i) {
-      const uint8_t *p = raw_buf + (size_t)i * FRAME_BYTES;
-      int32_t wl = (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) |
-                             ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24));
-      int32_t wr = (int32_t)((uint32_t)p[4] | ((uint32_t)p[5] << 8) |
-                             ((uint32_t)p[6] << 16) | ((uint32_t)p[7] << 24));
-      int32_t sl = wl >> 8; /* 24-bit audio, MSB-justified in the word */
-      int32_t sr = wr >> 8;
-      ch_l[i] = (int16_t)sl;
-      ch_r[i] = (int16_t)sr;
-      sum_sq_l += (int64_t)sl * sl;
-      sum_sq_r += (int64_t)sr * sr;
-      if (sl < pk_min_l) pk_min_l = sl;
-      if (sl > pk_max_l) pk_max_l = sl;
-      if (sr < pk_min_r) pk_min_r = sr;
-      if (sr > pk_max_r) pk_max_r = sr;
     }
 
     /* The INMP441 transmits on only one slot; use the louder one. */
     bool active_r = sum_sq_r > sum_sq_l;
     const int16_t *pcm = active_r ? ch_r : ch_l;
-    const int32_t *pk_min = active_r ? &pk_min_r : &pk_min_l;
-    const int32_t *pk_max = active_r ? &pk_max_r : &pk_max_l;
 
     //
     // Extract MFCC features exactly like the offline Speech-Commands
@@ -308,18 +345,9 @@ extern "C" void app_main(void) {
       conf = expf(scores[predicted] - mx) / sum;
     }
 
-    double rms = sqrt((double)sum_sq_l);
-    if (active_r) rms = sqrt((double)sum_sq_r);
-    char wave[WAVE_SAMPLES + 1];
-    wave_stamp(pcm, wave);
     printf("=== KWS block %lu (%.3f s, %d frames) ===\n",
            (unsigned long)block, (double)KWS_CLIP_SAMPLES / SAMPLE_RATE_HZ,
            KWS_N_FRAMES);
-    printf("active %s | rms %7.1f dBFS | peak %+5.1f/%5.1f dBFS | wave %s\n",
-           active_r ? "R" : "L",
-           (rms > 0.0) ? 20.0 * log10(rms / FULL_SCALE) : -INFINITY,
-           20.0 * log10((double)(-(*pk_min)) / FULL_SCALE),
-           20.0 * log10((double)(*pk_max) / FULL_SCALE), wave);
     printf("pred %d %-7s | conf %.2f | latency %.1f ms\n", predicted,
            predicted >= 0 ? KWS_LABELS[predicted] : "?", conf, latency_ms);
     /* Raw (pre-softmax) output scores so the host can tune its own

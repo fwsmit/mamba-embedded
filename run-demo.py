@@ -90,10 +90,21 @@ def idf_env():
     out = subprocess.run(["bash", str(IDF_ACTIVATE), "-e"],
                          capture_output=True, text=True, check=True)
     env = dict(os.environ)
+    orig_path = env.get("PATH", "")
     for line in out.stdout.splitlines():
         if "=" in line:
             k, v = line.split("=", 1)
             env[k] = v
+    # In -e mode the activation script prints PATH with only the IDF tool
+    # directories (the pre-activation system PATH is emitted separately as
+    # SYSTEM_PATH). When sourced it prepends those dirs onto the existing
+    # PATH instead. Reproduce that here, otherwise system tools (git, sed,
+    # basename, ...) are invisible to the build.
+    idf_path = env.pop("PATH", "")
+    if idf_path and orig_path:
+        env["PATH"] = idf_path + ":" + orig_path
+    elif idf_path:
+        env["PATH"] = idf_path
     for key in ("IDF_PYTHON_ENV_PATH", "IDF_PATH"):
         if key not in env:
             print(f"Error: IDF env variable {key} not set by activation script",
