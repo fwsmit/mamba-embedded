@@ -1,23 +1,30 @@
 #!/usr/bin/env python3
-"""Build (incrementally), flash and monitor the I2S microphone demo app.
+"""Monitor the I2S microphone demo app over serial.
 
-Same behaviour as run-demo.sh: copies model.espdl (never the dataset), builds
-the ESP-DL project with ACTIVE_APP=demo, flashes /dev/ttyACM0 and streams the
-serial output. Additionally opens a graphical window showing the live MCU
-information in a dashboard: the 24-sample waveform stamp, predicted keyword +
-confidence bar, RMS level meter, and rolling history plots of prediction,
-confidence, RMS and inference latency. Falls back to text-only monitoring when
-no display is available.
+By default this only opens the serial connection and streams the demo's
+output; no build or flash happens. With --flash it additionally copies
+model.espdl (never the dataset), builds the ESP-DL project with
+ACTIVE_APP=demo and flashes /dev/ttyACM0 before monitoring, like run-demo.sh.
+It opens a graphical window showing the live MCU information in a dashboard:
+the 24-sample waveform stamp, predicted keyword + confidence bar, RMS level
+meter, and rolling history plots of prediction, confidence, RMS and inference
+latency. Falls back to text-only monitoring when no display is available.
+Every newly guessed keyword (different from the previous guess) is published
+on a localhost TCP socket (see docs/word-socket.md).
 
-Usage: run-demo.py [-q] <path-to-model.espdl>
-  -q  quiet build/flash output (serial output is always streamed live)
+Usage: run-demo.py [--flash] [-q] [--port N] [<path-to-model.espdl>]
+  --flash  build and flash before monitoring (requires the model path)
+  -q       quiet build/flash output (serial output is always streamed live)
+  --port N localhost TCP port for the keyword socket (default 8765)
 """
 
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 try:
@@ -55,18 +62,45 @@ CLASS_COLORS = ["#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4"
                 "#46f0f0", "#f032e6", "#bcf60c", "#fabebe", "#008080", "#e6beff"]
 
 
+WORD_SOCKET_PORT = 8765
+
+
 def usage(stream=sys.stderr):
-    print("Usage: run-demo.py [-q] <path-to-model.espdl>", file=stream)
-    print("  -q  quiet build/flash output (serial output is always streamed live)",
+    print("Usage: run-demo.py [--flash] [-q] [--port N] [<path-to-model.espdl>]",
+          file=stream)
+    print("  --flash  build and flash before monitoring (requires the model path)",
+          file=stream)
+    print("  -q       quiet build/flash output (serial output is always streamed live)",
+          file=stream)
+    print("  --port N localhost TCP port for the keyword socket (default 8765)",
           file=stream)
 
 
 def parse_args(argv):
     quiet = False
+    flash = False
+    port = WORD_SOCKET_PORT
     positionals = []
-    for a in argv:
+    i = 0
+    while i < len(argv):
+        a = argv[i]
         if a == "-q":
             quiet = True
+        elif a == "--flash":
+            flash = True
+        elif a == "--port":
+            if i + 1 >= len(argv):
+                print("Error: --port requires a value", file=sys.stderr)
+                usage()
+                raise SystemExit(1)
+            try:
+                port = int(argv[i + 1])
+            except ValueError:
+                port = -1
+            if not (0 < port < 65536):
+                print(f"Error: invalid port: {argv[i + 1]}", file=sys.stderr)
+                raise SystemExit(1)
+            i += 1
         elif a in ("-h", "--help"):
             usage(sys.stdout)
             raise SystemExit(0)
@@ -76,10 +110,11 @@ def parse_args(argv):
             raise SystemExit(1)
         else:
             positionals.append(a)
-    if len(positionals) != 1:
+        i += 1
+    if len(positionals) > 1 or (flash and not positionals):
         usage()
         raise SystemExit(1)
-    return quiet, positionals[0]
+    return quiet, flash, port, positionals[0] if positionals else None
 
 
 def idf_env():
@@ -162,6 +197,84 @@ def wave_values(stamp):
             else (ord(c) - 48 if ':' <= c <= '@'
                   else (48 - ord(c) if 'A' <= c <= 'Z' else 0))
             for c in stamp]
+
+
+class WordServer:
+    """Line-oriented TCP server on localhost that publishes guessed keywords.
+
+    Each message is the keyword as UTF-8 text followed by a newline
+    (see docs/word-socket.md).
+    """
+
+    HOST = "127.0.0.1"
+
+    def __init__(self, port):
+        self.clients = []
+        self.lock = threading.Lock()
+        self.last_sent = None
+        self.sock = None
+        try:
+            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind((self.HOST, port))
+            srv.listen(4)
+        except OSError as e:
+            print(f"demo: keyword socket unavailable on port {port}: {e}",
+                  file=sys.stderr)
+            return
+        self.sock = srv
+        threading.Thread(target=self._accept_loop, daemon=True).start()
+        print(f"demo: publishing keywords on tcp://{self.HOST}:{port}",
+              file=sys.stderr)
+
+    def _accept_loop(self):
+        while True:
+            try:
+                conn, _addr = self.sock.accept()
+            except OSError:
+                break
+            try:
+                conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError:
+                pass
+            with self.lock:
+                self.clients.append(conn)
+
+    def send(self, word):
+        if self.sock is None:
+            return
+        with self.lock:
+            if word == self.last_sent:
+                return
+            self.last_sent = word
+        data = (word + "\n").encode("utf-8")
+        with self.lock:
+            alive = []
+            for c in self.clients:
+                try:
+                    c.sendall(data)
+                    alive.append(c)
+                except OSError:
+                    try:
+                        c.close()
+                    except OSError:
+                        pass
+            self.clients = alive
+
+    def close(self):
+        srv, self.sock = self.sock, None
+        with self.lock:
+            clients, self.clients = self.clients, []
+        for c in clients:
+            try:
+                c.close()
+            except OSError:
+                pass
+        if srv is not None:
+            try:
+                srv.close()
+            except OSError:
+                pass
 
 
 def meter_color(db):
@@ -408,7 +521,7 @@ class Plot(tk.Canvas):
 
 
 class DemoApp:
-    def __init__(self, model_name):
+    def __init__(self, model_name, word_server=None):
         if serial is None:
             raise RuntimeError("pyserial is required (pip install pyserial)")
         try:
@@ -419,6 +532,7 @@ class DemoApp:
         self.closed = False
         self.last_block = 0
         self.last_pred = None
+        self.word_server = word_server if word_server is not None else WordServer(WORD_SOCKET_PORT)
         self.root = tk.Tk()
         self.root.title(f"KWS Demo - {model_name}")
         self.root.configure(bg="#0d1117")
@@ -573,6 +687,7 @@ class DemoApp:
 
     def on_pred(self, idx, label, conf, latency):
         self.last_pred = (idx, label, conf, latency)
+        self.word_server.send(label)
         color = CLASS_COLORS[idx] if 0 <= idx < 12 else "#888888"
         self.conf_bar.set(conf)
         self.lbl_lat.config(text=f"{latency:.1f} ms")
@@ -621,11 +736,12 @@ class DemoApp:
         return self.exit_code
 
 
-def monitor_text_only():
+def monitor_text_only(port):
     if serial is None:
         print("Error: pyserial is required (pip install pyserial)",
               file=sys.stderr)
         return 1
+    word_server = WordServer(port)
     with serial.Serial(PORT, BAUD, timeout=0.1) as ser:
         try:
             while True:
@@ -635,6 +751,9 @@ def monitor_text_only():
                 line = raw.decode("utf-8", errors="replace").rstrip()
                 sys.stdout.write(line + "\n")
                 sys.stdout.flush()
+                m = RE_PRED.search(line)
+                if m:
+                    word_server.send(m.group(2))
                 if any(s in line for s in FAIL_SENTINELS):
                     print("\ndemo: device reported a failure: " + line,
                           file=sys.stderr)
@@ -652,22 +771,32 @@ def monitor_text_only():
 
 
 def main(argv):
-    quiet, model = parse_args(argv)
-    prepare_model(model)
-    env = idf_env()
-    build_and_flash(env, quiet)
-    print("demo: flashed, monitoring serial output (Ctrl+C to stop)",
-          file=sys.stderr)
+    quiet, flash, port, model = parse_args(argv)
+    if flash:
+        prepare_model(model)
+        env = idf_env()
+        build_and_flash(env, quiet)
+        print("demo: flashed, monitoring serial output (Ctrl+C to stop)",
+              file=sys.stderr)
+    else:
+        print("demo: monitoring serial output without flashing "
+              "(use --flash to build and flash first; Ctrl+C to stop)",
+              file=sys.stderr)
+    word_server = WordServer(port)
     try:
-        app = DemoApp(Path(model).name)
+        app = DemoApp(Path(model).name if model else "demo",
+                      word_server=word_server)
     except tk.TclError as e:
         print(f"demo: no display available ({e}); text-only monitoring",
               file=sys.stderr)
-        return monitor_text_only()
+        return monitor_text_only(port)
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-    return app.run()
+    try:
+        return app.run()
+    finally:
+        word_server.close()
 
 
 if __name__ == "__main__":
