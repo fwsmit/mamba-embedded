@@ -1,9 +1,12 @@
+# Mamba Embedded
 
-# Building
+This is the code for a thesis project running Mamba models on an ESP32-S3 MCU. The models are optimized to run with low latency and high accuracy on the limited hardware.
 
-## Install dependencies
+A demo showcasing real-time voice recognition using these models is located at [https://github.com/fwsmit/mamba-snake-demo](https://github.com/fwsmit/mamba-snake-demo).
 
-### Conda environment
+## Building
+
+### Install dependencies
 
 All Python scripts in this project require a dedicated conda environment.
 Create and activate it with:
