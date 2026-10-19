@@ -33,6 +33,12 @@ except ImportError:
     serial = None
 
 import tkinter as tk
+import tkinter.font as tkfont
+
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageTk
+except ImportError:
+    Image = None
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEMO_APP = SCRIPT_DIR / "esp-dl/main/apps/demo/app_main.cpp"
@@ -63,6 +69,54 @@ CLASS_COLORS = ["#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231", "#911eb4"
 
 
 WORD_SOCKET_PORT = 8765
+
+# Bold display font for the big predicted-word rendering (first match wins)
+WORD_FONT_FILES = [
+    "/usr/share/fonts/julietaula-montserrat-fonts/Montserrat-ExtraBold.otf",
+    "/usr/share/fonts/julietaula-montserrat-fonts/Montserrat-Bold.otf",
+    "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Bold.ttf",
+]
+
+
+def word_font_file():
+    for p in WORD_FONT_FILES:
+        if Path(p).is_file():
+            return p
+    return None
+
+
+def render_text_photo(text, color, px, font_file=None):
+    """Render antialiased text to a Tk PhotoImage at a pixel size (PIL)."""
+    font = ImageFont.truetype(font_file or word_font_file(), px)
+    bb = font.getbbox(text)
+    pad = 8
+    img = Image.new("RGBA", (bb[2] - bb[0] + pad * 2,
+                             bb[3] - bb[1] + pad * 2), (0, 0, 0, 0))
+    ImageDraw.Draw(img).text((pad - bb[0], pad - bb[1]), text, font=font,
+                             fill=color)
+    return ImageTk.PhotoImage(img)
+
+
+class PILLabel(tk.Label):
+    """Label that renders its text with PIL for crisp scalable text."""
+
+    def __init__(self, master, px=34, **kw):
+        super().__init__(master, bg="#0d1117", **kw)
+        self.px = px
+        self._photo = None
+        self.set_text("-")
+
+    def set_text(self, text, color="#e5e7eb"):
+        if Image is None or word_font_file() is None:
+            self.config(text=text, fg=color, image="")
+            return
+        try:
+            self._photo = render_text_photo(text, color, self.px)
+        except (OSError, RuntimeError):
+            self.config(text=text, fg=color, image="")
+            return
+        self.config(image=self._photo, text="")
 
 
 def usage(stream=sys.stderr):
@@ -277,6 +331,19 @@ class WordServer:
                 pass
 
 
+def blend(c1, c2, t):
+    """Mix two #rrggbb colours; t=0 -> c1, t=1 -> c2."""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+def round_rect(cv, x0, y0, x1, y1, r, **kw):
+    pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
+           x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+    return cv.create_polygon(pts, smooth=True, **kw)
+
+
 def meter_color(db):
     if db <= -40:
         return "#34d399"
@@ -286,6 +353,11 @@ def meter_color(db):
 
 
 def canvas_px(widget, dim, default):
+    # Prefer the actual mapped size: the width/height *options* keep their
+    # requested value even when pack/grid stretches the widget.
+    v = widget.winfo_width() if dim == "width" else widget.winfo_height()
+    if v > 1:
+        return v
     try:
         return int(widget[dim].rstrip("c"))
     except (ValueError, tk.TclError):
@@ -315,7 +387,7 @@ class Meter(tk.Canvas):
             yy = top + (1 - (db + 80.0) / 80.0) * (bottom - top)
             self.create_line(2, yy, w - 12, yy, fill="#2a2f36")
             self.create_text(w - 9, yy, text=f"{db}", anchor="w",
-                             fill="#6b7280", font=("Helvetica", 7))
+                             fill="#6b7280", font=("DejaVu Sans", 7))
 
 
 class WaveCanvas(tk.Canvas):
@@ -351,19 +423,113 @@ class WaveCanvas(tk.Canvas):
             self.create_polygon(pts, fill="#0f3d2e", outline="#10b981", width=1.2)
         self.create_line(0, base, w, base, fill="#1f2937")
         self.create_text(w - 4, 10, text="waveform", anchor="e",
-                         fill="#9ca3af", font=("Helvetica", 9))
+                         fill="#9ca3af", font=("DejaVu Sans", 9))
+
+
+class WordCard(tk.Canvas):
+    """Large at-a-glance display of the predicted keyword."""
+
+    BG = "#0d1117"
+
+    def __init__(self, master, **kw):
+        kw.setdefault("height", 280)
+        super().__init__(master, bg=self.BG, highlightthickness=0, **kw)
+        self.word = "…"
+        self.color = "#4b5563"
+        self.gated = True
+        self.pulse = 0.0
+        self._animating = False
+        self.bind("<Configure>", lambda e: self.draw())
+        self.draw()
+
+    def set_word(self, word, color, gated):
+        changed = (word, color, gated) != (self.word, self.color, self.gated)
+        self.word, self.color, self.gated = word, color, gated
+        if changed and not gated:
+            self.pulse = 1.0
+            self._animate()
+        else:
+            self.draw()
+
+    def _animate(self):
+        if self._animating and self.pulse > 0:
+            return
+        self._animating = True
+
+        def step():
+            self.draw()
+            if self.pulse > 0:
+                self.pulse = max(0.0, self.pulse - 0.08)
+                self.after(33, step)
+            else:
+                self._animating = False
+
+        step()
+
+    def draw(self):
+        self.delete("all")
+        w = canvas_px(self, "width", 640)
+        h = canvas_px(self, "height", 280)
+        mx, my, r = 18, 14, 22
+        base = "#3a4150" if self.gated else self.color
+        for i, alpha in enumerate((0.55, 0.72, 0.86)):
+            grow = (3 - i) * 4 + int(self.pulse * 4)
+            round_rect(self, mx - grow, my - grow, w - mx + grow, h - my + grow,
+                       r + grow, outline=blend(base, self.BG, alpha), width=2)
+        round_rect(self, mx, my, w - mx, h - my, r,
+                   fill=blend("#111418", base, 0.08),
+                   outline=blend(base, self.BG, 0.15 * (1 - self.pulse)),
+                   width=3 + int(self.pulse * 2))
+        self.create_text(mx + 16, my + 14, anchor="w", fill="#6b7280",
+                         text="P R E D I C T E D   C O M M A N D",
+                         font=("DejaVu Sans", 9, "bold"))
+        text = self.word
+        avail_w = w - 2 * mx - 36
+        avail_h = h - 2 * my - 64
+        color = "#4b5563" if self.gated else self.color
+        if Image is None or not self._draw_word_pil(text, color, w / 2,
+                                                    h / 2 + 14,
+                                                    avail_w, avail_h):
+            # fallback: Tk font rendering (no Pillow / no TTF found)
+            probe = tkfont.Font(family="DejaVu Sans", size=100, weight="bold")
+            px_per_pt = max(probe.metrics("linespace") / 100.0, 1e-6)
+            size = max(24, min(int(100 * avail_w / max(probe.measure(text), 1)),
+                               int(avail_h * 0.92 / px_per_pt)))
+            f = tkfont.Font(family="DejaVu Sans", size=size, weight="bold")
+            while size > 24 and (f.measure(text) > avail_w
+                                 or f.metrics("linespace") > avail_h):
+                size = max(24, int(size * 0.94))
+                f.configure(size=size)
+            self.create_text(w / 2, h / 2 + 14, text=text, fill=color,
+                             font=("DejaVu Sans", size, "bold"))
+
+    def _draw_word_pil(self, text, color, cx, cy, avail_w, avail_h):
+        try:
+            probe = ImageFont.truetype(word_font_file(), 100)
+            bb = probe.getbbox(text)
+            tw = max(bb[2] - bb[0], 1)
+            th = max(bb[3] - bb[1], 1)
+            size = max(20, int(100 * min(avail_w / tw, avail_h / th)))
+            self._photo = render_text_photo(text, color, size)
+            self.create_image(cx, cy, image=self._photo)
+            return True
+        except (OSError, RuntimeError):
+            return False
 
 
 class ConfBar(tk.Canvas):
-    def __init__(self, master, width, height):
-        super().__init__(master, width=width, height=height, bg="#111418",
+    def __init__(self, master, height=18):
+        super().__init__(master, height=height, bg="#0d1117",
                          highlightthickness=0)
         self.frac = 0.0
         self.thr = 0.0
+        self.color = "#34d399"
+        self.bind("<Configure>", lambda e: self.draw())
         self.draw()
 
-    def set(self, v):
+    def set(self, v, color="#34d399"):
         self.frac = max(0.0, min(1.0, v))
+        self.color = color
         self.draw()
 
     def set_threshold(self, frac):
@@ -372,16 +538,17 @@ class ConfBar(tk.Canvas):
 
     def draw(self):
         self.delete("all")
-        w = canvas_px(self, "width", 260)
-        h = canvas_px(self, "height", 14)
-        self.create_rectangle(0, 0, w, h, fill="#1a1f26", outline="#2a2f36")
-        self.create_rectangle(0, 0, int(w * self.frac), h,
-                              fill="#34d399", outline="")
+        w = canvas_px(self, "width", 300)
+        h = canvas_px(self, "height", 18)
+        r = h / 2
+        round_rect(self, 0, 0, w, h, r, fill="#1a1f26", outline="#2a2f36")
+        if self.frac > 0:
+            xf = max(w * self.frac, h)
+            round_rect(self, 0, 0, xf, h, min(r, xf / 2),
+                       fill=self.color, outline="")
         if 0.0 < self.thr < 1.0:
-            tx = int(w * self.thr)
-            self.create_line(tx, 1, tx, h - 1, fill="#f59e0b")
-        self.create_text(w / 2, h / 2, text=f"{self.frac * 100:.0f}%",
-                         fill="#0d1117", font=("Helvetica", 8, "bold"))
+            tx = w * self.thr
+            self.create_line(tx, 1, tx, h - 1, fill="#f59e0b", width=2)
 
 
 class LogitBars(tk.Canvas):
@@ -404,7 +571,7 @@ class LogitBars(tk.Canvas):
         w = canvas_px(self, "width", 560)
         h = canvas_px(self, "height", 100)
         self.create_text(2, 2, text="raw logits", anchor="nw",
-                         fill="#9ca3af", font=("Helvetica", 9))
+                         fill="#9ca3af", font=("DejaVu Sans", 9))
         n = len(self.vals)
         if not n:
             return
@@ -425,7 +592,7 @@ class LogitBars(tk.Canvas):
                                   outline="")
             self.create_text(x + bw / 2, h - 8, text=self.labels[i],
                              anchor="n", fill="#9ca3af",
-                             font=("Helvetica", 7))
+                             font=("DejaVu Sans", 7))
 
 
 class Plot(tk.Canvas):
@@ -476,7 +643,7 @@ class Plot(tk.Canvas):
         h = canvas_px(self, "height", 140)
         x0, x1, y0, y1 = 44, w - 6, 16, h - 22
         self.create_text((x0 + x1) / 2, 2, text=self.title, fill="#9ca3af",
-                         font=("Helvetica", 9))
+                         font=("DejaVu Sans", 9))
         ymin, ymax = self.y_limits()
         if ymin == ymax:
             ymax = ymin + 1.0
@@ -489,7 +656,7 @@ class Plot(tk.Canvas):
             yy = yv(v)
             self.create_line(x0, yy, x1, yy, fill="#1f242b")
             self.create_text(x0 - 4, yy, text=self.yfmt % v, anchor="e",
-                             fill="#6b7280", font=("Helvetica", 7))
+                             fill="#6b7280", font=("DejaVu Sans", 7))
         if self.thr is not None and self.ymin is not None \
                 and self.ymax is not None and self.ymin <= self.thr <= self.ymax:
             self.create_line(x0, yv(self.thr), x1, yv(self.thr),
@@ -506,7 +673,7 @@ class Plot(tk.Canvas):
             return x0 + (x - min(self.xs)) / xspan * (x1 - x0)
 
         if self.class_rows:
-            pw = max((x1 - x0) / n, 2.0)
+            pw = min(max((x1 - x0) / n, 2.0), 24.0)
             for x, y, c in zip(self.xs, self.ys, self.cs):
                 cx = xv(x)
                 self.create_line(cx, yv(max(y, 0)), cx, yv(min(y + 1, 12)),
@@ -517,7 +684,7 @@ class Plot(tk.Canvas):
                                  xv(self.xs[i]), yv(self.ys[i]),
                                  fill=self.cs[i], width=1.5)
         self.create_text(x1, y1 + 10, text=f"block {self.xs[-1]:.0f}",
-                         anchor="e", fill="#6b7280", font=("Helvetica", 7))
+                         anchor="e", fill="#6b7280", font=("DejaVu Sans", 7))
 
 
 class DemoApp:
@@ -543,48 +710,64 @@ class DemoApp:
     def _build_ui(self):
         root = self.root
         header = tk.Frame(root, bg="#0d1117")
-        header.pack(fill="x", padx=8, pady=(8, 4))
-        left = tk.Frame(header, bg="#0d1117")
-        left.pack(side="left")
-        self.lbl_kw = tk.Label(left, text="-", font=("Helvetica", 40, "bold"),
-                               fg="#e5e7eb", bg="#0d1117")
-        self.lbl_kw.pack(anchor="w")
-        self.conf_bar = ConfBar(left, 260, 14)
-        self.conf_bar.pack(anchor="w", pady=(2, 0))
+        header.pack(fill="x", padx=12, pady=(10, 6))
+        tk.Label(header, text="KWS Live Demo", font=("DejaVu Sans", 14, "bold"),
+                 fg="#e5e7eb", bg="#0d1117").pack(side="left")
         right = tk.Frame(header, bg="#0d1117")
         right.pack(side="right")
-        self.lbl_active = tk.Label(right, text="active -", font=("Helvetica", 12),
+        self.lbl_active = tk.Label(right, text="active -", font=("DejaVu Sans", 11),
                                    fg="#9ca3af", bg="#0d1117")
         self.lbl_active.pack(anchor="e")
-        self.lbl_lat = tk.Label(right, text="- ms", font=("Helvetica", 12),
+        self.lbl_lat = tk.Label(right, text="- ms", font=("DejaVu Sans", 11),
                                 fg="#9ca3af", bg="#0d1117")
         self.lbl_lat.pack(anchor="e")
 
-        self.logit_bars = LogitBars(root, KWS_LABELS)
-        self.logit_bars.pack(fill="x", padx=8, pady=2)
+        body = tk.Frame(root, bg="#0d1117")
+        body.pack(fill="both", expand=True, padx=12)
+        body.columnconfigure(0, weight=3, uniform="cols")
+        body.columnconfigure(1, weight=2, uniform="cols")
+        body.rowconfigure(0, weight=1)
 
-        thr_row = tk.Frame(root, bg="#0d1117")
-        thr_row.pack(fill="x", padx=8, pady=(0, 2))
-        tk.Label(thr_row, text="min conf to show command:",
-                 font=("Helvetica", 10), fg="#9ca3af",
-                 bg="#0d1117").pack(side="left")
+        left = tk.Frame(body, bg="#0d1117")
+        left.grid(row=0, column=0, sticky="nsew")
+        self.word_card = WordCard(left)
+        self.word_card.pack(fill="both", expand=True)
+        conf_row = tk.Frame(left, bg="#0d1117")
+        conf_row.pack(fill="x", pady=(6, 0))
+        self.lbl_conf = PILLabel(conf_row, px=40, fg="#6b7280")
+        self.lbl_conf.pack(side="left")
+        self.conf_bar = ConfBar(conf_row)
+        self.conf_bar.pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        right = tk.Frame(body, bg="#0d1117")
+        right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        self.wave = WaveCanvas(right, height=130)
+        self.wave.pack(fill="x")
+        self.logit_bars = LogitBars(right, KWS_LABELS, height=150)
+        self.logit_bars.pack(fill="both", expand=True, pady=(8, 0))
+        meter_row = tk.Frame(right, bg="#0d1117")
+        meter_row.pack(fill="both", expand=True, pady=(8, 0))
+        self.rms_meter = Meter(meter_row, width=54, height=150)
+        self.rms_meter.pack(side="left", fill="y")
+        self.thr_frame = tk.Frame(meter_row, bg="#0d1117")
+        self.thr_frame.pack(side="left", fill="both", expand=True, padx=(8, 0))
+        tk.Label(self.thr_frame, text="min confidence to show command",
+                 font=("DejaVu Sans", 9), fg="#9ca3af",
+                 bg="#0d1117").pack(anchor="w")
         self.thr_var = tk.DoubleVar(value=20.0)
-        self.thr_scale = tk.Scale(thr_row, from_=0, to=100, orient="horizontal",
-                                  variable=self.thr_var, resolution=1,
-                                  showvalue=True, bg="#111418", fg="#e5e7eb",
-                                  troughcolor="#1a1f26", highlightthickness=0,
+        self.thr_scale = tk.Scale(self.thr_frame, from_=0, to=100,
+                                  orient="horizontal", variable=self.thr_var,
+                                  resolution=1, showvalue=True,
+                                  bg="#0d1117", fg="#9ca3af",
+                                  troughcolor="#1a1f26",
+                                  activebackground="#34d399",
+                                  highlightthickness=0,
+                                  font=("DejaVu Sans", 9),
                                   command=lambda _v: self.on_threshold())
-        self.thr_scale.pack(side="left", fill="x", expand=True)
-
-        mid = tk.Frame(root, bg="#0d1117")
-        mid.pack(fill="both", expand=True, padx=8)
-        self.wave = WaveCanvas(mid)
-        self.wave.pack(side="left", fill="both", expand=True)
-        self.rms_meter = Meter(mid, width=70, height=200)
-        self.rms_meter.pack(side="left", padx=(8, 0))
+        self.thr_scale.pack(fill="x", expand=True)
 
         plots = tk.Frame(root, bg="#0d1117")
-        plots.pack(fill="both", expand=True, padx=8, pady=6)
+        plots.pack(fill="x", padx=12, pady=6)
         self.pred_plot = Plot(plots, "prediction", -0.5, 11.5, yfmt="%d",
                               class_rows=True)
         self.conf_plot = Plot(plots, "confidence", 0, 1.05, yfmt="%.1f")
@@ -601,9 +784,9 @@ class DemoApp:
         self.on_threshold()
 
         status = tk.Frame(root, bg="#0d1117")
-        status.pack(fill="x", side="bottom", padx=8, pady=(0, 8))
+        status.pack(fill="x", side="bottom", padx=12, pady=(0, 8))
         self.status_var = tk.StringVar(value=f"monitoring {PORT} - waiting for first block")
-        tk.Label(status, textvariable=self.status_var, font=("Helvetica", 10),
+        tk.Label(status, textvariable=self.status_var, font=("DejaVu Sans", 10),
                  fg="#9ca3af", bg="#0d1117").pack(side="left")
         tk.Button(status, text="Stop", command=self.stop).pack(side="right")
 
@@ -689,7 +872,10 @@ class DemoApp:
         self.last_pred = (idx, label, conf, latency)
         self.word_server.send(label)
         color = CLASS_COLORS[idx] if 0 <= idx < 12 else "#888888"
-        self.conf_bar.set(conf)
+        self.conf_bar.set(conf, color)
+        self.lbl_conf.set_text(f"{conf * 100:.0f}%",
+                               color=color if conf >= self.thr_var.get() / 100.0
+                               else "#6b7280")
         self.lbl_lat.config(text=f"{latency:.1f} ms")
         self.pred_plot.add(self.last_block, idx if idx >= 0 else 0, color)
         self.pred_plot.redraw()
@@ -713,12 +899,8 @@ class DemoApp:
         """Show the command only while confidence is at/above the slider."""
         idx, label, conf, _latency = self.last_pred
         thr = self.thr_var.get() / 100.0
-        if conf >= thr:
-            self.lbl_kw.config(
-                text=label,
-                fg=CLASS_COLORS[idx] if 0 <= idx < 12 else "#888888")
-        else:
-            self.lbl_kw.config(text="…", fg="#4b5563")
+        color = CLASS_COLORS[idx] if 0 <= idx < 12 else "#888888"
+        self.word_card.set_word("…" if conf < thr else label, color, conf < thr)
 
     def run(self):
         try:
